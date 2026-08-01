@@ -13,6 +13,7 @@ import type {
   WebcastLikeMessage,
   WebcastSocialMessage,
   WebcastMemberMessage,
+  WebcastRoomUserSeqMessage,
 } from "tiktok-live-proto/v3";
 import type {
   BroadcastEvent,
@@ -22,6 +23,7 @@ import type {
   FollowPayload,
   SharePayload,
   MemberPayload,
+  ViewerPayload,
 } from "./types.js";
 
 type EventMap = { [key: string]: (...args: never[]) => void };
@@ -43,7 +45,7 @@ function avatarUrl(user: { avatarThumb?: { urlList?: string[] } } | undefined): 
 
 export class TikTokService extends EventEmitter {
   private connection: TikTokConn | null = null;
-  private readonly options: TikTokServiceOptions;
+  private options: TikTokServiceOptions;
   private reconnectDelay = 1500;
   private manualDisconnect = false;
   private reconnectTimer: NodeJS.Timeout | null = null;
@@ -55,6 +57,10 @@ export class TikTokService extends EventEmitter {
   constructor(options: TikTokServiceOptions) {
     super();
     this.options = options;
+  }
+
+  get username(): string {
+    return this.options.username;
   }
 
   start(): void {
@@ -71,6 +77,13 @@ export class TikTokService extends EventEmitter {
     this.connection?.disconnect();
     this.connection = null;
     this.connected = false;
+  }
+
+  reconfigure(username: string): void {
+    this.stop();
+    this.options.username = username;
+    this.emitStatus();
+    this.start();
   }
 
   private async connect(): Promise<void> {
@@ -231,6 +244,16 @@ export class TikTokService extends EventEmitter {
         timestamp: Date.now(),
       };
       this.emit("event", { type: "member", data: payload } satisfies BroadcastEvent);
+    });
+
+    conn.on(WebcastEvent.ROOM_USER, (data: WebcastRoomUserSeqMessage) => {
+      const viewerCount = Number(data.totalUser ?? 0);
+      if (!viewerCount) return;
+      const payload: ViewerPayload = {
+        viewerCount,
+        timestamp: Date.now(),
+      };
+      this.emit("event", { type: "viewer", data: payload } satisfies BroadcastEvent);
     });
   }
 

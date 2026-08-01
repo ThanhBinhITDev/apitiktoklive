@@ -50,11 +50,35 @@ export type BroadcastEvent =
   | { type: "follow"; data: FollowPayload }
   | { type: "share"; data: SharePayload }
   | { type: "member"; data: MemberPayload }
+  | { type: "viewer"; data: ViewerPayload }
   | { type: "status"; data: { connected: boolean; username: string; roomId?: string } };
+
+export interface ViewerPayload {
+  viewerCount: number;
+  timestamp: number;
+}
 
 export interface ServerEvent {
   type: "tiktok" | "stats";
   payload: BroadcastEvent | StatsPayload;
+}
+
+export interface TopSender {
+  uniqueId: string;
+  nickname: string;
+  avatarUrl: string;
+  totalDiamonds: number;
+  giftCount: number;
+}
+
+export interface RecentEvent {
+  type: "comment" | "gift";
+  user: UserPayload;
+  content?: string;
+  giftName?: string;
+  diamondCount?: number;
+  repeatCount?: number;
+  timestamp: number;
 }
 
 export interface StatsPayload {
@@ -62,4 +86,9 @@ export interface StatsPayload {
   likes: number;
   comments: number;
   gifts: number;
+  totalDiamonds: number;
+  sessionSeconds: number;
+  connected: boolean;
+  topSenders: TopSender[];
+  recentEvents: RecentEvent[];
 }
