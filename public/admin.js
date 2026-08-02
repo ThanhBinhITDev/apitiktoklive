@@ -200,6 +200,7 @@ function updateStatus(s) {
 
 function feedAdd(ev) {
   if (state.paused) return;
+  if (ev.type === "viewer") return;
 
   const feed = $("#feed");
   const empty = feed.querySelector(".feed-empty");
@@ -300,6 +301,8 @@ $("#feed-clear").addEventListener("click", () => {
 
 function updateStats(s) {
   state.stats = s;
+  const chip = $("#chip-viewers");
+  if (chip) chip.textContent = `👁 ${s.viewers ?? 0}`;
   document.querySelectorAll(".stat-num").forEach((el) => {
     const k = el.dataset.k;
     if (k === "sessionSeconds") el.textContent = fmtDur(s[k] || 0);
@@ -314,6 +317,11 @@ function updateStats(s) {
   likerBody.innerHTML = s.topLikers.length
     ? s.topLikers.map((u, i) => `<tr><td>${i + 1}</td><td>${userCell(u)}</td><td>${u.likeCount.toLocaleString("vi-VN")}</td></tr>`).join("")
     : '<tr><td colspan="3" class="hint">Chưa có dữ liệu</td></tr>';
+
+  const followBody = $("#recent-followers");
+  followBody.innerHTML = (s.followers || []).length
+    ? s.followers.map((f, i) => `<tr><td>${i + 1}</td><td>${userCell(f)}</td><td>${fmtTime(f.timestamp)}</td></tr>`).join("")
+    : '<tr><td colspan="3" class="hint">Chưa có ai follow.</td></tr>';
 }
 
 function row(u, i, cells) {

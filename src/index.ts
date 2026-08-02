@@ -298,7 +298,7 @@ wssAdmin.on("connection", (socket, req) => {
   });
   track(adminClients, alive, clientIp(req), "admin");
   sendStatusTo(alive);
-  send(alive, { type: "stats", payload: stats.getSnapshot() });
+  send(alive, { type: "stats", payload: stats.getSnapshot(true) });
 });
 
 setInterval(() => {
@@ -317,7 +317,7 @@ setInterval(() => {
 }, 30000);
 
 setInterval(() => {
-  broadcastAdmin({ type: "stats", payload: stats.getSnapshot() });
+  broadcastAdmin({ type: "stats", payload: stats.getSnapshot(true) });
 }, 2000);
 
 // ---------- auth routes ----------
@@ -436,7 +436,7 @@ app.get("/api/admin/stats", requireAdmin, (_req, res) => {
 
 app.post("/api/admin/stats/reset", requireAdmin, (_req, res) => {
   stats.reset();
-  broadcastAdmin({ type: "stats", payload: stats.getSnapshot() });
+  broadcastAdmin({ type: "stats", payload: stats.getSnapshot(true) });
   console.log(`${color(C.dim, `[${fmtTime()}]`)} ${color(C.bold + C.yellow, pad("[stats]", TAG_W))} ${color(C.dim, pad("-", USER_W))} Reset thong ke`);
   res.json({ ok: true });
 });

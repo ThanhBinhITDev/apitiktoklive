@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Quản trị phiên · TikTok Live Bridge</title>
-  <link rel="stylesheet" href="/admin.css?v=4" />
+  <link rel="stylesheet" href="/admin.css?v=6" />
 </head>
 <body>
   <!-- Login -->
@@ -67,7 +67,7 @@
             <button id="feed-clear" class="btn btn-ghost btn-sm">Xóa</button>
           </div>
         </div>
-        <p class="panel-hint">Dòng sự kiện realtime từ TikTok (hoặc demo). Dùng các nút lọc ở trên để xem theo loại: Cmt / Quà / Tim / Follow / Share / Vào live. <b>Tạm dừng</b> dừng hiển thị nhưng server vẫn ghi dữ liệu; <b>Xóa</b> làm trống danh sách.</p>
+        <p class="panel-hint">Dòng sự kiện realtime từ TikTok (hoặc demo). Dùng các nút lọc ở trên để xem theo loại: Cmt / Quà / Tim / Follow / Share / Vào live. Số người xem không tạo dòng riêng — xem ở chip <b>👁</b> và tab Thống kê. <b>Tạm dừng</b> dừng hiển thị nhưng server vẫn ghi dữ liệu; <b>Xóa</b> làm trống danh sách.</p>
         <div id="feed" class="feed"><div class="feed-empty">Chờ sự kiện từ TikTok hoặc demo mode…</div></div>
       </section>
 
@@ -102,6 +102,15 @@
             <table class="table">
               <thead><tr><th>#</th><th>Người dùng</th><th>Lượt tim</th></tr></thead>
               <tbody id="top-likers"></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="card follow-list-card">
+          <h3>Người mới follow</h3>
+          <div class="table-wrap">
+            <table class="table">
+              <thead><tr><th>#</th><th>Người dùng</th><th>Lúc</th></tr></thead>
+              <tbody id="recent-followers"></tbody>
             </table>
           </div>
         </div>
@@ -173,7 +182,7 @@
           <h3>Ghi chú từng chức năng</h3>
           <ul class="docs-list">
             <li><b>Feed</b> — hiển thị 300 sự kiện gần nhất trong trình duyệt; lọc theo loại, tạm dừng, xóa.</li>
-            <li><b>Thống kê</b> — cập nhật mỗi 2s; nút Reset xóa số liệu phiên.</li>
+            <li><b>Thống kê</b> — cập nhật mỗi 2s; gồm top tặng quà, top tap tim và <b>danh sách người mới follow</b>; nút Reset xóa số liệu phiên.</li>
             <li><b>Client</b> — liệt kê kết nối WebSocket (game + admin), có thể ngắt từng client. Tự làm mới mỗi 5s.</li>
             <li><b>Cấu hình</b> — đổi username/WS_TOKEN/demo mode, áp dụng ngay, lưu vào <code>config.json</code>. Nút <b>Kết nối lại TikTok</b> dùng khi kết nối bị rớt.</li>
             <li>Toàn bộ <code>/api/admin/*</code> và WebSocket admin <code>/admin</code> yêu cầu phiên đăng nhập (cookie 12 giờ).</li>
@@ -271,6 +280,6 @@ ws.onmessage = (e) => {
 
   <div id="toast" class="toast hidden"></div>
 
-  <script src="/admin.js?v=4"></script>
+  <script src="/admin.js?v=6"></script>
 </body>
 </html>

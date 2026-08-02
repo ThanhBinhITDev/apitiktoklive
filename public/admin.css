@@ -223,6 +223,9 @@ body {
 }
 @media (max-width: 720px) { .two-col { grid-template-columns: 1fr; } }
 
+.follow-list-card { max-width: 640px; margin-top: 14px; }
+.follow-list-card .table-wrap .table { min-width: 0; }
+
 .card {
   background: var(--surface);
   border: 1px solid var(--border);

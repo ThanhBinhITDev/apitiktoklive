@@ -1,4 +1,4 @@
-import type { BroadcastEvent, RecentEvent, StatsSnapshot, TopLiker, TopSender, UserPayload } from "./types.js";
+import type { BroadcastEvent, RecentEvent, RecentFollower, StatsSnapshot, TopLiker, TopSender, UserPayload } from "./types.js";
 
 function userKey(user: UserPayload): string {
   return user.uniqueId || user.nickname;
@@ -10,8 +10,10 @@ export class StatsManager {
   private counters = { likes: 0, comments: 0, gifts: 0, follows: 0, shares: 0, members: 0, totalDiamonds: 0 };
   private senders = new Map<string, TopSender>();
   private likers = new Map<string, TopLiker>();
+  private followers: RecentFollower[] = [];
   private recent: RecentEvent[] = [];
   private static readonly MAX_RECENT = 50;
+  private static readonly MAX_FOLLOWERS = 20;
 
   record(event: BroadcastEvent): void {
     switch (event.type) {
@@ -50,6 +52,13 @@ export class StatsManager {
       }
       case "follow":
         this.counters.follows++;
+        this.followers.unshift({
+          uniqueId: event.data.user.uniqueId,
+          nickname: event.data.user.nickname,
+          avatarUrl: event.data.user.avatarUrl,
+          timestamp: event.data.timestamp,
+        });
+        if (this.followers.length > StatsManager.MAX_FOLLOWERS) this.followers.length = StatsManager.MAX_FOLLOWERS;
         break;
       case "share":
         this.counters.shares++;
@@ -72,7 +81,7 @@ export class StatsManager {
     }
   }
 
-  getSnapshot(): StatsSnapshot {
+  getSnapshot(omitRecent = false): StatsSnapshot {
     return {
       viewers: this.lastViewerCount,
       likes: this.counters.likes,
@@ -85,7 +94,8 @@ export class StatsManager {
       sessionSeconds: Math.round((Date.now() - this.startedAt) / 1000),
       topSenders: [...this.senders.values()].sort((a, b) => b.totalDiamonds - a.totalDiamonds).slice(0, 5),
       topLikers: [...this.likers.values()].sort((a, b) => b.likeCount - a.likeCount).slice(0, 5),
-      recentEvents: [...this.recent],
+      followers: [...this.followers],
+      recentEvents: omitRecent ? [] : [...this.recent],
     };
   }
 
@@ -95,6 +105,7 @@ export class StatsManager {
     this.counters = { likes: 0, comments: 0, gifts: 0, follows: 0, shares: 0, members: 0, totalDiamonds: 0 };
     this.senders.clear();
     this.likers.clear();
+    this.followers = [];
     this.recent = [];
   }
 }

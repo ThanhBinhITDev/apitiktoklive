@@ -85,6 +85,13 @@ export interface TopLiker {
   likeCount: number;
 }
 
+export interface RecentFollower {
+  uniqueId: string;
+  nickname: string;
+  avatarUrl: string;
+  timestamp: number;
+}
+
 export interface RecentEvent {
   type: "comment" | "gift";
   user: UserPayload;
@@ -107,6 +114,7 @@ export interface StatsSnapshot {
   sessionSeconds: number;
   topSenders: TopSender[];
   topLikers: TopLiker[];
+  followers: RecentFollower[];
   recentEvents: RecentEvent[];
 }
 
