@@ -17,6 +17,7 @@
     statDiamonds: $("stat-diamonds"),
     statDuration: $("stat-duration"),
     topSenders: $("top-senders-body"),
+    topLikers: $("top-likers-body"),
     recentFeed: $("recent-feed"),
     commandFeed: $("command-feed"),
   };
@@ -65,6 +66,24 @@
           <td>${formatNumber(s.totalDiamonds)} 💎</td>
           <td>${s.giftCount}</td>`;
         els.topSenders.appendChild(tr);
+      });
+    }
+
+    const likers = payload.topLikers ?? [];
+    els.topLikers.innerHTML = "";
+    if (likers.length === 0) {
+      els.topLikers.innerHTML = '<tr><td colspan="3" class="dash-empty">Chưa có dữ liệu</td></tr>';
+    } else {
+      likers.forEach((s, i) => {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td>${i + 1}</td>
+          <td class="dash-user-cell">
+            <img class="dash-avatar" src="${s.avatarUrl || ""}" alt="" />
+            <span>${escapeHtml(s.nickname || s.uniqueId)}</span>
+          </td>
+          <td>${formatNumber(s.likeCount)} ❤️</td>`;
+        els.topLikers.appendChild(tr);
       });
     }
 

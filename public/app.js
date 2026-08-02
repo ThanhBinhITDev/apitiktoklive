@@ -2,6 +2,7 @@
   const chatLayer = document.getElementById("chat-layer");
   const giftLayer = document.getElementById("gift-layer");
   const likeLayer = document.getElementById("like-layer");
+  const tapperLabel = document.getElementById("tapper-label");
   const notificationLayer = document.getElementById("notification-layer");
   const statusBar = document.getElementById("status-bar");
   const statusText = document.getElementById("status-text");
@@ -171,7 +172,26 @@
   }
 
   // ---------- Likes / hearts ----------
-  function spawnHearts({ count }) {
+  let lastTapperShown = 0;
+  let tapperTimer = null;
+
+  function showTapper(user) {
+    if (!user) return;
+    const now = Date.now();
+    if (now - lastTapperShown < 1500) return;
+    lastTapperShown = now;
+
+    tapperLabel.textContent = `${user.nickname || user.uniqueId} ❤️`;
+    tapperLabel.hidden = false;
+    clearTimeout(tapperTimer);
+    tapperTimer = setTimeout(() => {
+      tapperLabel.hidden = true;
+    }, 1600);
+  }
+
+  function spawnHearts(ev) {
+    showTapper(ev.user);
+    const count = ev.count ?? 1;
     const n = Math.min(count, 8);
     for (let i = 0; i < n; i++) {
       const heart = document.createElement("div");

@@ -13,6 +13,7 @@ export class StatsManager {
   private connected = false;
   private sessionStartedAt: number | null = null;
   private topSendersMap = new Map<string, TopSender>();
+  private topLikersMap = new Map<string, TopLiker>();
   private recentEvents: RecentEvent[] = [];
 
   reset(): void {
@@ -24,6 +25,7 @@ export class StatsManager {
     this.connected = false;
     this.sessionStartedAt = null;
     this.topSendersMap.clear();
+    this.topLikersMap.clear();
     this.recentEvents = [];
   }
 
@@ -74,9 +76,23 @@ export class StatsManager {
         });
         break;
       }
-      case "like":
+      case "like": {
         this.likes += event.data.count;
+        const u = event.data.user;
+        if (u) {
+          const entry = this.topLikersMap.get(u.uniqueId) ?? {
+            uniqueId: u.uniqueId,
+            nickname: u.nickname,
+            avatarUrl: u.avatarUrl,
+            likeCount: 0,
+          };
+          entry.likeCount += event.data.count;
+          entry.nickname = u.nickname;
+          entry.avatarUrl = u.avatarUrl || entry.avatarUrl;
+          this.topLikersMap.set(u.uniqueId, entry);
+        }
         break;
+      }
       case "viewer":
         this.viewers = event.data.viewerCount;
         break;
@@ -100,6 +116,10 @@ export class StatsManager {
       .sort((a, b) => b.totalDiamonds - a.totalDiamonds)
       .slice(0, TOP_SENDER_LIMIT);
 
+    const topLikers = [...this.topLikersMap.values()]
+      .sort((a, b) => b.likeCount - a.likeCount)
+      .slice(0, TOP_LIKER_LIMIT);
+
     return {
       viewers: this.viewers,
       likes: this.likes,
@@ -109,6 +129,7 @@ export class StatsManager {
       sessionSeconds: this.sessionStartedAt ? Math.floor((Date.now() - this.sessionStartedAt) / 1000) : 0,
       connected: this.connected,
       topSenders,
+      topLikers,
       recentEvents: [...this.recentEvents],
     };
   }
