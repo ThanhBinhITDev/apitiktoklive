@@ -24,9 +24,7 @@ import type {
   SharePayload,
   MemberPayload,
   ViewerPayload,
-  CommandPayload,
 } from "./types.js";
-import { CommandMatcher, GIFT_KEY } from "./commands.js";
 import { color, C, fmtTime, pad } from "./log.js";
 
 type EventMap = { [key: string]: (...args: never[]) => void };
@@ -38,11 +36,9 @@ type TikTokConn = InstanceType<typeof TikTokLiveConnection> & TypedEmitter<Clien
 
 export interface TikTokServiceOptions {
   username: string;
-  commands?: string[];
-  giftCommands?: string[];
-  commandCooldownMs?: number;
   signApiKey?: string;
   enableExtendedGiftInfo?: boolean;
+  demoMode?: boolean;
 }
 
 function avatarUrl(user: { avatarThumb?: { urlList?: string[] } } | undefined): string {
@@ -56,9 +52,6 @@ function isRateLimitError(err: unknown): boolean {
 export class TikTokService extends EventEmitter {
   private connection: TikTokConn | null = null;
   private options: TikTokServiceOptions;
-  private matcher = new CommandMatcher();
-  private giftIds = new Set<string>();
-  private lastCommandAt = new Map<string, number>();
   private reconnectDelay = 1500;
   private readonly MAX_RECONNECT_DELAY = 30000;
   private rateLimitDelay = 60000;
@@ -74,8 +67,6 @@ export class TikTokService extends EventEmitter {
   constructor(options: TikTokServiceOptions) {
     super();
     this.options = options;
-    this.setCommands(options.commands ?? []);
-    this.setGiftCommands(options.giftCommands ?? []);
   }
 
   get username(): string {
@@ -96,59 +87,21 @@ export class TikTokService extends EventEmitter {
     this.connection?.disconnect();
     this.connection = null;
     this.connected = false;
+    this.roomId = null;
   }
 
-  reconfigure(opts: { username?: string; commands?: string[]; giftCommands?: string[]; commandCooldownMs?: number }): void {
+  reconfigure(opts: { username?: string; demoMode?: boolean }): void {
+    const changedUsername =
+      opts.username !== undefined &&
+      opts.username.replace(/^@/, "").trim() !== "" &&
+      opts.username.replace(/^@/, "").trim() !== this.options.username;
+    const changedDemo = opts.demoMode !== undefined && opts.demoMode !== this.options.demoMode;
+    if (opts.demoMode !== undefined) this.options.demoMode = opts.demoMode;
+    if (!changedUsername && !changedDemo) return;
     this.stop();
-    if (opts.username) this.options.username = opts.username;
-    if (opts.commands) this.setCommands(opts.commands);
-    if (opts.giftCommands) this.setGiftCommands(opts.giftCommands);
-    if (opts.commandCooldownMs !== undefined) this.setCommandCooldown(opts.commandCooldownMs);
+    if (changedUsername) this.options.username = opts.username!.replace(/^@/, "").trim();
     this.emitStatus();
-    this.start();
-  }
-
-  setCommands(commands: string[]): void {
-    this.options.commands = commands;
-    this.matcher.setCommands(commands);
-  }
-
-  get commands(): string[] {
-    return this.options.commands ?? [];
-  }
-
-  setGiftCommands(giftCommands: string[]): void {
-    this.options.giftCommands = giftCommands;
-    this.giftIds = new Set(giftCommands.map((g) => String(g).trim()).filter(Boolean));
-  }
-
-  get giftCommands(): string[] {
-    return this.options.giftCommands ?? [];
-  }
-
-  setCommandCooldown(ms: number): void {
-    this.options.commandCooldownMs = ms;
-    this.lastCommandAt.clear();
-  }
-
-  get commandCooldownMs(): number {
-    return this.options.commandCooldownMs ?? 0;
-  }
-
-  canEmitCommand(uniqueId: string, key: string, now = Date.now()): boolean {
-    const cooldownMs = this.commandCooldownMs;
-    if (cooldownMs <= 0) return true;
-    const cmdKey = `${uniqueId}:${key}`;
-    const lastAt = this.lastCommandAt.get(cmdKey);
-    if (lastAt === undefined) {
-      this.lastCommandAt.set(cmdKey, now);
-      return true;
-    }
-    if (now - lastAt >= cooldownMs) {
-      this.lastCommandAt.set(cmdKey, now);
-      return true;
-    }
-    return false;
+    if (!this.options.demoMode) this.start();
   }
 
   private async connect(): Promise<void> {
@@ -232,17 +185,6 @@ export class TikTokService extends EventEmitter {
         timestamp: Date.now(),
       };
       this.emit("event", { type: "comment", data: payload } satisfies BroadcastEvent);
-
-      const matchedKey = this.matcher.match(data.content);
-      if (matchedKey && this.canEmitCommand(payload.user.uniqueId, matchedKey)) {
-        const commandPayload: CommandPayload = {
-          key: matchedKey,
-          user: payload.user,
-          content: data.content,
-          timestamp: payload.timestamp,
-        };
-        this.emit("event", { type: "command", data: commandPayload } satisfies BroadcastEvent);
-      }
     });
 
     conn.on(WebcastEvent.GIFT, (data: WebcastGiftMessage) => {
@@ -272,20 +214,6 @@ export class TikTokService extends EventEmitter {
         timestamp: Date.now(),
       };
       this.emit("event", { type: "gift", data: payload } satisfies BroadcastEvent);
-
-      if (this.giftIds.has(payload.giftId)) {
-        const commandPayload: CommandPayload = {
-          key: GIFT_KEY,
-          user: payload.user,
-          content: giftName,
-          timestamp: payload.timestamp,
-          giftId: payload.giftId,
-          giftName,
-          diamondCount,
-          repeatCount: payload.repeatCount,
-        };
-        this.emit("event", { type: "command", data: commandPayload } satisfies BroadcastEvent);
-      }
     });
 
     conn.on(WebcastEvent.LIKE, (data: WebcastLikeMessage) => {
@@ -386,6 +314,7 @@ export class TikTokService extends EventEmitter {
         connected: this.connected,
         username: this.options.username,
         roomId: this.roomId ?? undefined,
+        demoMode: this.options.demoMode ?? false,
       },
     } satisfies BroadcastEvent);
   }

@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Quản trị phiên · TikTok Live Bridge</title>
+  <link rel="stylesheet" href="/admin.css?v=3" />
+</head>
+<body>
+  <!-- Login -->
+  <div id="login-screen" class="login-wrap hidden">
+    <form id="login-form" class="login-card">
+      <div class="login-title">Quản trị phiên</div>
+      <div class="login-sub">TikTok Live Data Bridge</div>
+      <label class="field">
+        <span>Mật khẩu (ADMIN_TOKEN)</span>
+        <input id="login-password" type="password" autocomplete="current-password" required />
+      </label>
+      <button type="submit" class="btn btn-primary btn-block">Đăng nhập</button>
+      <div id="login-error" class="login-error hidden"></div>
+      <p class="login-note">Mật khẩu = <code>ADMIN_TOKEN</code> trong <code>.env</code>. Nếu để trống, token được sinh ngẫu nhiên và in ở dòng <code>Admin:</code> lúc khởi động server.</p>
+    </form>
+  </div>
+
+  <!-- App -->
+  <div id="app" class="app hidden">
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-dot"></span>
+        <span class="brand-title">TikTok Live Bridge</span>
+        <span class="brand-tag">Quản trị phiên</span>
+      </div>
+      <div class="status-chips">
+        <span id="chip-mode" class="chip">—</span>
+        <span id="chip-conn" class="chip chip-ok">Chưa kết nối</span>
+        <span id="chip-room" class="chip chip-dim">room: —</span>
+        <span id="chip-viewers" class="chip">👁 0</span>
+        <span id="chip-user" class="chip">@—</span>
+        <span id="chip-uptime" class="chip">⏱ 0s</span>
+        <button id="logout-btn" class="btn btn-ghost btn-sm">Đăng xuất</button>
+      </div>
+    </header>
+
+    <nav class="tabs">
+      <button class="tab active" data-tab="feed">Feed</button>
+      <button class="tab" data-tab="stats">Thống kê</button>
+      <button class="tab" data-tab="clients">Client</button>
+      <button class="tab" data-tab="config">Cấu hình</button>
+      <button class="tab" data-tab="docs">Hướng dẫn & API</button>
+    </nav>
+
+    <main class="content">
+      <!-- Feed -->
+      <section id="panel-feed" class="panel active">
+        <div class="panel-head">
+          <div class="filters">
+            <button class="filter active" data-filter="all">Tất cả</button>
+            <button class="filter" data-filter="comment">Cmt</button>
+            <button class="filter" data-filter="gift">Quà</button>
+            <button class="filter" data-filter="like">Tim</button>
+            <button class="filter" data-filter="follow">Follow</button>
+            <button class="filter" data-filter="share">Share</button>
+            <button class="filter" data-filter="member">Vào live</button>
+          </div>
+          <div class="feed-tools">
+            <button id="feed-pause" class="btn btn-ghost btn-sm">Tạm dừng</button>
+            <button id="feed-clear" class="btn btn-ghost btn-sm">Xóa</button>
+          </div>
+        </div>
+        <p class="panel-hint">Dòng sự kiện realtime từ TikTok (hoặc demo). Dùng các nút lọc ở trên để xem theo loại: Cmt / Quà / Tim / Follow / Share / Vào live. <b>Tạm dừng</b> dừng hiển thị nhưng server vẫn ghi dữ liệu; <b>Xóa</b> làm trống danh sách.</p>
+        <div id="feed" class="feed"></div>
+      </section>
+
+      <!-- Stats -->
+      <section id="panel-stats" class="panel">
+        <div class="panel-head">
+          <h2>Thống kê phiên</h2>
+          <button id="stats-reset" class="btn btn-danger btn-sm">Reset thống kê</button>
+        </div>
+        <p class="panel-hint">Số liệu của phiên hiện tại, cập nhật mỗi 2 giây qua WebSocket admin. <b>Reset thống kê</b> xóa toàn bộ bộ đếm và bảng top (không ảnh hưởng kết nối TikTok).</p>
+        <div class="stat-cards">
+          <div class="stat-card"><div class="stat-num" data-k="viewers">0</div><div class="stat-label">Người xem</div></div>
+          <div class="stat-card"><div class="stat-num" data-k="comments">0</div><div class="stat-label">Bình luận</div></div>
+          <div class="stat-card"><div class="stat-num" data-k="likes">0</div><div class="stat-label">Lượt tim</div></div>
+          <div class="stat-card"><div class="stat-num" data-k="gifts">0</div><div class="stat-label">Quà tặng</div></div>
+          <div class="stat-card"><div class="stat-num" data-k="totalDiamonds">0</div><div class="stat-label">Kim cương</div></div>
+          <div class="stat-card"><div class="stat-num" data-k="sessionSeconds">0</div><div class="stat-label">Thời lượng</div></div>
+        </div>
+        <div class="two-col">
+          <div class="card">
+            <h3>Top người tặng quà</h3>
+            <table class="table">
+              <thead><tr><th>#</th><th>Người dùng</th><th>Quà</th><th>Kim cương</th></tr></thead>
+              <tbody id="top-senders"></tbody>
+            </table>
+          </div>
+          <div class="card">
+            <h3>Top người tap tim</h3>
+            <table class="table">
+              <thead><tr><th>#</th><th>Người dùng</th><th>Lượt tim</th></tr></thead>
+              <tbody id="top-likers"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- Clients -->
+      <section id="panel-clients" class="panel">
+        <div class="panel-head">
+          <h2>Client đang kết nối</h2>
+          <button id="clients-refresh" class="btn btn-ghost btn-sm">Làm mới</button>
+        </div>
+        <p class="panel-hint">Danh sách các kết nối WebSocket đang mở tới server. <b>Game</b> = client của bạn (WebSocket công khai); <b>Quản trị</b> = các phiên đăng nhập trang này. Nút <b>Ngắt</b> đóng kết nối của client đó ngay lập tức.</p>
+        <table class="table">
+          <thead><tr><th>ID</th><th>Loại</th><th>IP</th><th>Kết nối lúc</th><th></th></tr></thead>
+          <tbody id="clients-body"></tbody>
+        </table>
+        <p class="hint">Game client dùng WebSocket công khai; admin client là chính trang quản trị này.</p>
+      </section>
+
+      <!-- Config -->
+      <section id="panel-config" class="panel">
+        <div class="panel-head"><h2>Cấu hình phiên</h2></div>
+        <form id="config-form" class="config-form">
+          <label class="field">
+            <span>Tài khoản TikTok (username, không cần @)</span>
+            <input id="cfg-username" type="text" required />
+          </label>
+          <label class="field">
+            <span>WS_TOKEN (token game cần kèm ?token=)</span>
+            <input id="cfg-wstoken" type="text" placeholder="Để trống = không cần token" />
+          </label>
+          <label class="checkbox">
+            <input id="cfg-demo" type="checkbox" />
+            <span>Chế độ demo (phát dữ liệu giả để test, không cần TikTok)</span>
+          </label>
+          <div class="config-actions">
+            <button type="submit" class="btn btn-primary">Lưu & áp dụng</button>
+            <button id="cfg-reconnect" type="button" class="btn btn-ghost">Kết nối lại TikTok</button>
+          </div>
+          <div id="config-msg" class="config-msg hidden"></div>
+        </form>
+        <div class="card note-card">
+          <h3>Ghi chú</h3>
+          <p>Giá trị trong <code>.env</code> (TIKTOK_USERNAME / WS_TOKEN / DEMO_MODE) được ưu tiên lúc khởi động. Thay đổi ở đây áp dụng ngay và lưu vào <code>config.json</code>; bỏ biến trong <code>.env</code> để dùng giá trị đã lưu.</p>
+        </div>
+      </section>
+
+      <!-- Docs -->
+      <section id="panel-docs" class="panel">
+        <div class="panel-head"><h2>Hướng dẫn & API</h2></div>
+
+        <div class="card docs-block">
+          <h3>Hướng dẫn sử dụng</h3>
+          <ol class="docs-list">
+            <li>Mở trang <code>/admin</code>, đăng nhập bằng <code>ADMIN_TOKEN</code> (trong <code>.env</code>; nếu để trống thì xem dòng <code>ADMIN_TOKEN:</code> ở log lúc khởi động server).</li>
+            <li>Kiểm tra trạng thái trên thanh trên cùng: <b>Live/Demo</b>, <b>Đã kết nối TikTok</b> hay chưa, room id, người xem, thời gian chạy.</li>
+            <li>Vào tab <b>Cấu hình</b>: đặt username TikTok đang live, đặt <code>WS_TOKEN</code> nếu muốn bảo vệ cổng WebSocket, bật <b>Chế độ demo</b> để test không cần TikTok. Nhấn <b>Lưu &amp; áp dụng</b>.</li>
+            <li>Tab <b>Feed</b> để theo dõi sự kiện realtime; <b>Thống kê</b> để xem tổng quan; <b>Client</b> để quản lý kết nối từ game.</li>
+            <li>Game của bạn kết nối vào WebSocket (phần dưới) để nhận data — <b>không cần đăng nhập admin</b>.</li>
+          </ol>
+        </div>
+
+        <div class="card docs-block">
+          <h3>Ghi chú từng chức năng</h3>
+          <ul class="docs-list">
+            <li><b>Feed</b> — hiển thị 300 sự kiện gần nhất trong trình duyệt; lọc theo loại, tạm dừng, xóa.</li>
+            <li><b>Thống kê</b> — cập nhật mỗi 2s; nút Reset xóa số liệu phiên.</li>
+            <li><b>Client</b> — liệt kê kết nối WebSocket (game + admin), có thể ngắt từng client. Tự làm mới mỗi 5s.</li>
+            <li><b>Cấu hình</b> — đổi username/WS_TOKEN/demo mode, áp dụng ngay, lưu vào <code>config.json</code>. Nút <b>Kết nối lại TikTok</b> dùng khi kết nối bị rớt.</li>
+            <li>Toàn bộ <code>/api/admin/*</code> và WebSocket admin <code>/admin</code> yêu cầu phiên đăng nhập (cookie 12 giờ).</li>
+          </ul>
+        </div>
+
+        <div class="card docs-block">
+          <h3>Kết nối từ game (WebSocket)</h3>
+          <p class="docs-label">Địa chỉ WebSocket của phiên này:</p>
+          <div class="ws-url-row">
+            <code id="docs-ws-url" class="ws-url"></code>
+            <button class="btn btn-ghost btn-sm" data-copy="docs-ws-url">Copy</button>
+          </div>
+          <p class="docs-note" id="docs-ws-token-note"></p>
+          <pre class="code-block"><code>// Ví dụ kết nối từ game (JavaScript)
+const ws = new WebSocket(WS_URL); // thay WS_URL bằng link ở trên
+
+ws.onopen = () => console.log("Đã kết nối!");
+ws.onmessage = (e) => {
+  const msg = JSON.parse(e.data);      // { type: "tiktok", payload: { type, data } }
+  const ev = msg.payload;
+  switch (ev.type) {
+    case "comment": console.log(ev.data.user.nickname, ":", ev.data.content);
+    case "gift":    console.log(ev.data.giftName, "x" + ev.data.repeatCount, ev.data.diamondCount + " diam");
+    case "like":    console.log("+" + ev.data.count, "tim"); // user có thể là null
+    case "follow": case "share": case "member": console.log(ev.data.user.nickname, ev.type);
+    case "viewer":  console.log("viewers:", ev.data.viewerCount);
+    case "status":  console.log("connected:", ev.data.connected, ev.data.roomId);
+  }
+};</code></pre>
+          <p class="docs-note">Ngay khi client vừa kết nối, server gửi 1 event <code>status</code> (connected, username, roomId) để game biết trạng thái hiện tại. Nếu <code>WS_TOKEN</code> sai → server đóng kết nối mã <b>1008</b>.</p>
+        </div>
+
+        <div class="card docs-block">
+          <h3>Cấu trúc payload</h3>
+          <p class="docs-note">Mọi sự kiện gửi tới game đều có dạng <code>{ "type": "tiktok", "payload": { "type": "…", "data": {…} } }</code>.</p>
+          <table class="table">
+            <thead><tr><th>Loại</th><th>Nội dung <code>data</code></th></tr></thead>
+            <tbody>
+              <tr><td><span class="tag tag-comment">comment</span></td><td><code>{ user, content, timestamp }</code></td></tr>
+              <tr><td><span class="tag tag-gift">gift</span></td><td><code>{ user, giftId, giftName, diamondCount, repeatCount, imageUrl, timestamp }</code></td></tr>
+              <tr><td><span class="tag tag-like">like</span></td><td><code>{ user|null, count, total, timestamp }</code> — TikTok gộp like nên <code>user</code> có thể <b>null</b></td></tr>
+              <tr><td><span class="tag tag-follow">follow</span></td><td><code>{ user, timestamp }</code></td></tr>
+              <tr><td><span class="tag tag-share">share</span></td><td><code>{ user, timestamp }</code></td></tr>
+              <tr><td><span class="tag tag-member">member</span></td><td><code>{ user, memberCount, timestamp }</code></td></tr>
+              <tr><td><span class="tag tag-viewer">viewer</span></td><td><code>{ viewerCount, timestamp }</code></td></tr>
+              <tr><td><span class="tag tag-status">status</span></td><td><code>{ connected, username, roomId?, demoMode? }</code></td></tr>
+            </tbody>
+          </table>
+          <p class="docs-note"><code>user</code> = <code>{ uniqueId, nickname, avatarUrl }</code>. Tap tim 1 lần và double-tap đều cùng loại event, chỉ khác <code>count</code>.</p>
+        </div>
+
+        <div class="card docs-block">
+          <h3>API tham chiếu</h3>
+          <table class="table">
+            <thead><tr><th>Phương thức</th><th>Đường dẫn</th><th>Bảo mật</th><th>Mô tả</th></tr></thead>
+            <tbody>
+              <tr><td><span class="method">GET</span></td><td><code>/api/health</code></td><td><span class="badge badge-public">Công khai</span></td><td>Kiểm tra sống: uptime, connected, username, roomId, viewers, demoMode.</td></tr>
+              <tr><td><span class="method">POST</span></td><td><code>/api/login</code></td><td><span class="badge badge-admin">Admin</span></td><td>Đăng nhập <code>{ "password": "…" }</code> → trả session cookie.</td></tr>
+              <tr><td><span class="method">POST</span></td><td><code>/api/logout</code></td><td><span class="badge badge-admin">Admin</span></td><td>Đăng xuất, xóa cookie.</td></tr>
+              <tr><td><span class="method">GET</span></td><td><code>/api/admin/status</code></td><td><span class="badge badge-admin">Admin</span></td><td>Snapshot trạng thái TikTok.</td></tr>
+              <tr><td><span class="method">GET</span></td><td><code>/api/admin/config</code></td><td><span class="badge badge-admin">Admin</span></td><td>Đọc username / wsToken / demoMode.</td></tr>
+              <tr><td><span class="method">POST</span></td><td><code>/api/admin/config</code></td><td><span class="badge badge-admin">Admin</span></td><td>Lưu + áp dụng ngay cấu hình mới.</td></tr>
+              <tr><td><span class="method">POST</span></td><td><code>/api/admin/reconnect</code></td><td><span class="badge badge-admin">Admin</span></td><td>Kết nối lại TikTok.</td></tr>
+              <tr><td><span class="method">GET</span></td><td><code>/api/admin/clients</code></td><td><span class="badge badge-admin">Admin</span></td><td>Danh sách client WebSocket đang kết nối.</td></tr>
+              <tr><td><span class="method">POST</span></td><td><code>/api/admin/clients/:id/kick</code></td><td><span class="badge badge-admin">Admin</span></td><td>Ngắt một client theo id.</td></tr>
+              <tr><td><span class="method">GET</span></td><td><code>/api/admin/stats</code></td><td><span class="badge badge-admin">Admin</span></td><td>Snapshot thống kê phiên.</td></tr>
+              <tr><td><span class="method">POST</span></td><td><code>/api/admin/stats/reset</code></td><td><span class="badge badge-admin">Admin</span></td><td>Reset thống kê.</td></tr>
+              <tr><td><span class="method">WS</span></td><td><code>/</code></td><td><span class="badge badge-public">Công khai</span></td><td>Game nhận event realtime (xem phần trên).</td></tr>
+              <tr><td><span class="method">WS</span></td><td><code>/admin</code></td><td><span class="badge badge-admin">Admin</span></td><td>Nhận status/stats/feed cho trang quản trị (cookie).</td></tr>
+            </tbody>
+          </table>
+          <p class="docs-note">Đường dẫn health check: <code id="docs-health-url"></code></p>
+          <p class="docs-note">Lỗi trả về dạng <code>{ "ok": false, "error": "…" }</code>; chưa đăng nhập các route admin trả <b>401</b>.</p>
+        </div>
+
+        <div class="card docs-block">
+          <h3>Ghi chú chung</h3>
+          <ul class="docs-list">
+            <li><b>1 instance = 1 thuê bao = 1 phiên live.</b> Muốn nhiều thuê bao thì chạy nhiều container với port + token riêng.</li>
+            <li>Cần username TikTok <b>đang live</b> mới kết nối được; offline → tự retry (backoff tối đa 30s).</li>
+            <li>Nhiều kết nối từ cùng 1 IP dễ bị TikTok rate limit (backoff 60s → 5 phút). Nên phân tán server/IP và dùng <code>SIGN_API_KEY</code> (Euler Stream) nếu cần.</li>
+            <li><code>ENABLE_EXTENDED_GIFT_INFO</code> mặc định <code>false</code> — bật cần gói Business của Euler Stream (trả phí).</li>
+            <li>Env trong <code>.env</code> ưu tiên hơn <code>config.json</code> lúc khởi động; muốn dùng giá trị đã lưu thì bỏ biến tương ứng.</li>
+            <li>Nếu để trống <code>ADMIN_TOKEN</code>, token tự sinh sẽ <b>đổi mỗi lần restart</b> server — nên đặt mật khẩu cố định trong <code>.env</code>.</li>
+          </ul>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="/admin.js?v=3"></script>
+</body>
+</html>

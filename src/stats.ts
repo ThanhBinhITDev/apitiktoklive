@@ -1,136 +1,100 @@
-import type { BroadcastEvent, StatsPayload, TopSender, TopLiker, RecentEvent } from "./types.js";
+import type { BroadcastEvent, RecentEvent, StatsSnapshot, TopLiker, TopSender, UserPayload } from "./types.js";
 
-const RECENT_EVENT_LIMIT = 30;
-const TOP_SENDER_LIMIT = 10;
-const TOP_LIKER_LIMIT = 10;
+function userKey(user: UserPayload): string {
+  return user.uniqueId || user.nickname;
+}
 
 export class StatsManager {
-  private viewers = 0;
-  private likes = 0;
-  private comments = 0;
-  private gifts = 0;
-  private totalDiamonds = 0;
-  private connected = false;
-  private sessionStartedAt: number | null = null;
-  private topSendersMap = new Map<string, TopSender>();
-  private topLikersMap = new Map<string, TopLiker>();
-  private recentEvents: RecentEvent[] = [];
-
-  reset(): void {
-    this.viewers = 0;
-    this.likes = 0;
-    this.comments = 0;
-    this.gifts = 0;
-    this.totalDiamonds = 0;
-    this.connected = false;
-    this.sessionStartedAt = null;
-    this.topSendersMap.clear();
-    this.topLikersMap.clear();
-    this.recentEvents = [];
-  }
-
-  markConnected(connected: boolean): void {
-    this.connected = connected;
-    if (connected && !this.sessionStartedAt) {
-      this.sessionStartedAt = Date.now();
-    }
-  }
+  private startedAt = Date.now();
+  private lastViewerCount = 0;
+  private counters = { likes: 0, comments: 0, gifts: 0, follows: 0, shares: 0, members: 0, totalDiamonds: 0 };
+  private senders = new Map<string, TopSender>();
+  private likers = new Map<string, TopLiker>();
+  private recent: RecentEvent[] = [];
+  private static readonly MAX_RECENT = 50;
 
   record(event: BroadcastEvent): void {
     switch (event.type) {
-      case "comment": {
-        this.comments++;
-        this.pushRecent({
-          type: "comment",
-          user: event.data.user,
-          content: event.data.content,
-          timestamp: event.data.timestamp,
-        });
+      case "comment":
+        this.counters.comments++;
+        this.pushRecent({ type: "comment", user: event.data.user, content: event.data.content, timestamp: event.data.timestamp });
         break;
-      }
       case "gift": {
-        this.gifts++;
-        this.totalDiamonds += event.data.diamondCount;
         const d = event.data;
-        const entry = this.topSendersMap.get(d.user.uniqueId) ?? {
-          uniqueId: d.user.uniqueId,
-          nickname: d.user.nickname,
-          avatarUrl: d.user.avatarUrl,
-          totalDiamonds: 0,
-          giftCount: 0,
-        };
-        entry.totalDiamonds += d.diamondCount;
-        entry.giftCount += d.repeatCount;
-        entry.nickname = d.user.nickname;
-        entry.avatarUrl = d.user.avatarUrl || entry.avatarUrl;
-        this.topSendersMap.set(d.user.uniqueId, entry);
-
-        this.pushRecent({
-          type: "gift",
-          user: d.user,
-          giftId: d.giftId,
-          giftName: d.giftName,
-          diamondCount: d.diamondCount,
-          repeatCount: d.repeatCount,
-          timestamp: d.timestamp,
-        });
+        const diamonds = d.diamondCount * d.repeatCount;
+        this.counters.gifts++;
+        this.counters.totalDiamonds += diamonds;
+        const key = userKey(d.user);
+        const cur = this.senders.get(key);
+        if (cur) {
+          cur.totalDiamonds += diamonds;
+          cur.giftCount++;
+        } else {
+          this.senders.set(key, { uniqueId: d.user.uniqueId, nickname: d.user.nickname, avatarUrl: d.user.avatarUrl, totalDiamonds: diamonds, giftCount: 1 });
+        }
+        this.pushRecent({ type: "gift", user: d.user, giftName: d.giftName, diamondCount: d.diamondCount, repeatCount: d.repeatCount, timestamp: d.timestamp });
         break;
       }
       case "like": {
-        this.likes += event.data.count;
-        const u = event.data.user;
-        if (u) {
-          const entry = this.topLikersMap.get(u.uniqueId) ?? {
-            uniqueId: u.uniqueId,
-            nickname: u.nickname,
-            avatarUrl: u.avatarUrl,
-            likeCount: 0,
-          };
-          entry.likeCount += event.data.count;
-          entry.nickname = u.nickname;
-          entry.avatarUrl = u.avatarUrl || entry.avatarUrl;
-          this.topLikersMap.set(u.uniqueId, entry);
+        this.counters.likes += event.data.count;
+        if (event.data.user) {
+          const u = event.data.user;
+          const cur = this.likers.get(userKey(u));
+          if (cur) {
+            cur.likeCount += event.data.count;
+          } else {
+            this.likers.set(userKey(u), { uniqueId: u.uniqueId, nickname: u.nickname, avatarUrl: u.avatarUrl, likeCount: event.data.count });
+          }
         }
         break;
       }
+      case "follow":
+        this.counters.follows++;
+        break;
+      case "share":
+        this.counters.shares++;
+        break;
+      case "member":
+        this.counters.members++;
+        break;
       case "viewer":
-        this.viewers = event.data.viewerCount;
+        this.lastViewerCount = event.data.viewerCount;
         break;
       case "status":
-        this.markConnected(event.data.connected);
-        break;
-      default:
         break;
     }
   }
 
   private pushRecent(ev: RecentEvent): void {
-    this.recentEvents.unshift(ev);
-    if (this.recentEvents.length > RECENT_EVENT_LIMIT) {
-      this.recentEvents.length = RECENT_EVENT_LIMIT;
+    this.recent.push(ev);
+    if (this.recent.length > StatsManager.MAX_RECENT) {
+      this.recent.splice(0, this.recent.length - StatsManager.MAX_RECENT);
     }
   }
 
-  getSnapshot(): StatsPayload {
-    const topSenders = [...this.topSendersMap.values()]
-      .sort((a, b) => b.totalDiamonds - a.totalDiamonds)
-      .slice(0, TOP_SENDER_LIMIT);
-
-    const topLikers = [...this.topLikersMap.values()]
-      .sort((a, b) => b.likeCount - a.likeCount)
-      .slice(0, TOP_LIKER_LIMIT);
-
+  getSnapshot(): StatsSnapshot {
     return {
-      viewers: this.viewers,
-      likes: this.likes,
-      comments: this.comments,
-      gifts: this.gifts,
-      totalDiamonds: this.totalDiamonds,
-      sessionSeconds: this.sessionStartedAt ? Math.floor((Date.now() - this.sessionStartedAt) / 1000) : 0,
-      connected: this.connected,
-      topSenders,
-      topLikers,
-      recentEvents: [...this.recentEvents],
+      viewers: this.lastViewerCount,
+      likes: this.counters.likes,
+      comments: this.counters.comments,
+      gifts: this.counters.gifts,
+      follows: this.counters.follows,
+      shares: this.counters.shares,
+      members: this.counters.members,
+      totalDiamonds: this.counters.totalDiamonds,
+      sessionSeconds: Math.round((Date.now() - this.startedAt) / 1000),
+      topSenders: [...this.senders.values()].sort((a, b) => b.totalDiamonds - a.totalDiamonds).slice(0, 5),
+      topLikers: [...this.likers.values()].sort((a, b) => b.likeCount - a.likeCount).slice(0, 5),
+      recentEvents: [...this.recent],
     };
+  }
+
+  reset(): void {
+    this.startedAt = Date.now();
+    this.lastViewerCount = 0;
+    this.counters = { likes: 0, comments: 0, gifts: 0, follows: 0, shares: 0, members: 0, totalDiamonds: 0 };
+    this.senders.clear();
+    this.likers.clear();
+    this.recent = [];
   }
 }

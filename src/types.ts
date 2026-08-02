@@ -43,6 +43,18 @@ export interface MemberPayload {
   timestamp: number;
 }
 
+export interface ViewerPayload {
+  viewerCount: number;
+  timestamp: number;
+}
+
+export interface StatusPayload {
+  connected: boolean;
+  username: string;
+  roomId?: string;
+  demoMode?: boolean;
+}
+
 export type BroadcastEvent =
   | { type: "comment"; data: CommentPayload }
   | { type: "gift"; data: GiftPayload }
@@ -51,28 +63,11 @@ export type BroadcastEvent =
   | { type: "share"; data: SharePayload }
   | { type: "member"; data: MemberPayload }
   | { type: "viewer"; data: ViewerPayload }
-  | { type: "command"; data: CommandPayload }
-  | { type: "status"; data: { connected: boolean; username: string; roomId?: string } };
-
-export interface ViewerPayload {
-  viewerCount: number;
-  timestamp: number;
-}
-
-export interface CommandPayload {
-  key: string;
-  user: UserPayload;
-  content: string;
-  timestamp: number;
-  giftId?: string;
-  giftName?: string;
-  diamondCount?: number;
-  repeatCount?: number;
-}
+  | { type: "status"; data: StatusPayload };
 
 export interface ServerEvent {
-  type: "tiktok" | "stats" | "command";
-  payload: BroadcastEvent | StatsPayload | CommandPayload;
+  type: "tiktok";
+  payload: BroadcastEvent;
 }
 
 export interface TopSender {
@@ -94,22 +89,44 @@ export interface RecentEvent {
   type: "comment" | "gift";
   user: UserPayload;
   content?: string;
-  giftId?: string;
   giftName?: string;
   diamondCount?: number;
   repeatCount?: number;
   timestamp: number;
 }
 
-export interface StatsPayload {
+export interface StatsSnapshot {
   viewers: number;
   likes: number;
   comments: number;
   gifts: number;
+  follows: number;
+  shares: number;
+  members: number;
   totalDiamonds: number;
   sessionSeconds: number;
-  connected: boolean;
   topSenders: TopSender[];
   topLikers: TopLiker[];
   recentEvents: RecentEvent[];
+}
+
+export interface StatusSnapshot {
+  connected: boolean;
+  username: string;
+  roomId: string | null;
+  viewers: number | null;
+  demoMode: boolean;
+  uptime: number;
+}
+
+export type AdminWsMessage =
+  | { type: "tiktok"; payload: BroadcastEvent }
+  | { type: "stats"; payload: StatsSnapshot }
+  | { type: "status"; payload: StatusSnapshot };
+
+export interface ClientInfo {
+  id: number;
+  ip: string;
+  connectedAt: number;
+  kind: "game" | "admin";
 }

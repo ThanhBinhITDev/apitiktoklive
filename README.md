@@ -1,112 +1,115 @@
-# TikTok Live Overlay
+# TikTok Live Data Bridge
 
-Ứng dụng nhận diện và hiển thị **realtime** bình luận (cmt), quà tặng (gift), lượt tim (like), follow, chia sẻ trong một phiên live TikTok, hiển thị dưới dạng overlay cho OBS.
+Server tối giản kết nối **TikTok Live** và phát **realtime** mọi event (cmt, quà, like, follow, share, member, viewer) qua **WebSocket** cho game của bạn. Game tự xử lý lệnh/cooldown/thống kê — ở đây chỉ có dòng data.
+
+Mô hình cho thuê: **1 instance = 1 thuê bao = 1 phiên live**. Muốn nhiều thuê bao thì chạy nhiều container (Docker per tenant) và để một hệ thống quản lý riêng điều phối.
 
 ## Kiến trúc
 
 ```
-┌─────────────┐     WebSocket      ┌──────────────────────┐
-│ TikTok Live │ ─────────────────► │ Backend (Node/TS)     │
-│ Webcast     │  tiktok-live-connector │  Express + ws      │
-└─────────────┘                    │  /public/ overlay     │
-                                   └──────────┬───────────┘
-                                              │ WebSocket
-                                              ▼
-                                   ┌──────────────────────┐
-                                   │ Browser overlay (OBS) │
-                                   └──────────────────────┘
+┌─────────────┐      Webcast      ┌───────────────────────┐      WebSocket      ┌────────────┐
+│ TikTok Live │ ────────────────► │ Data Bridge (Node/TS) │ ──────────────────► │ Game của   │
+│ Webcast     │  tiktok-live-connector │ Express + ws   │   {type:"tiktok"}   │ bạn (1+ client)│
+└─────────────┘                    └───────────────────────┘                     └────────────┘
 ```
 
-## Cài đặt
+## Cài đặt & chạy
 
 ```bash
 npm install
-cp .env.example .env
-# Sửa .env: đặt TIKTOK_USERNAME = username tài khoản TikTok đang live
+cp .env.example .env      # đặt TIKTOK_USERNAME, WS_TOKEN nếu muốn
+npm run dev               # dev mode
+npm run build && npm start # bản production
 ```
-
-## Chạy
-
-```bash
-npm run dev        # dev mode (tự reload)
-npm run build      # build TypeScript
-npm start          # chạy bản build
-npm test           # chạy unit test (matcher, normalize, cooldown)
-npm run typecheck  # kiểm tra type
-```
-
-## Cấu hình (.env)
 
 | Biến | Mô tả |
 |---|---|
-| `TIKTOK_USERNAME` | Username TikTok đang live (không cần `@`) |
+| `TIKTOK_USERNAME` | Username TikTok đang live (không cần `@`). Ưu tiên hơn `config.json` |
 | `PORT` | Port server (mặc định `3000`) |
-| `DEMO_MODE` | `true` = phát dữ liệu giả để test giao diện, không cần TikTok |
-| `ENABLE_EXTENDED_GIFT_INFO` | `true` để lấy thêm thông tin quà. **Mặc định `false`** — bật `true` cần Euler Stream Business plan (trả phí) |
+| `ADMIN_TOKEN` | Mật khẩu trang quản trị `/admin`. Để trống = tự sinh ngẫu nhiên (xem log lúc khởi động) |
+| `WS_TOKEN` | Token bảo vệ WebSocket (tùy chọn). Nếu đặt, client phải kết nối kèm `?token=` |
+| `DEMO_MODE` | `true` = phát dữ liệu giả để test game, không cần TikTok |
+| `ENABLE_EXTENDED_GIFT_INFO` | `true` để lấy thêm thông tin quà. **Mặc định `false`** — bật cần Euler Stream Business plan (trả phí) |
 | `SIGN_API_KEY` | (Tùy chọn) API key Euler Stream nếu gặp lỗi ký kết nối |
+| `CONFIG_PATH` | Đường dẫn file `config.json` (tùy chọn). Mặc định `./config.json` |
 
-## Cấu hình lệnh (config.json)
-
-`config.json` (sinh ra khi khởi động đầu tiên) chứa username, danh sách lệnh, quà nhận diện và cooldown:
+`config.json` chỉ chứa username (dùng khi không set env):
 
 ```json
-{
-  "username": "nhn.3021",
-  "commands": ["start", "vote", "help"],
-  "giftCommands": ["1005", "1006"],
-  "commandCooldownMs": 3000
-}
+{ "username": "bar.online5" }
 ```
 
-- Người xem comment **đúng** một trong các key (vd `vote`, `VOTE`, `Vôte` — bỏ dấu, hoa/thường) → hệ thống nhận diện là **lệnh** và gửi qua WebSocket dạng `{ "type": "command", "payload": { "key": "vote", "user": {...}, "content": "vote", "timestamp": ... } }`.
-- **`giftCommands`** là danh sách **giftId** quà được nhận diện thành lệnh. Quà có giftId nằm trong danh sách → gửi lệnh `{ "key": "gift", "giftId": "...", "giftName": "...", "diamondCount": ..., "repeatCount": ... }`. Quà khác **vẫn hiện overlay** nhưng **không** gửi lệnh cho game.
-- **`commandCooldownMs`** chống spam lệnh: mỗi user + mỗi key chỉ tính lệnh mới sau đúng khoảng thời gian này (ms). `0` = tắt. Comment vẫn hiện trên overlay dù có bị cooldown hay không.
-- **Cách tìm giftId**: mở Dashboard (`/dashboard`), xem feed sự kiện gần đây — mỗi quà hiển thị mã `#giftId` (mã ổn định của TikTok, không đổi theo ngôn ngữ).
-- Sửa danh sách lệnh/quà/cooldown trực tiếp trong file `config.json` hoặc qua Dashboard (`/dashboard`).
+Khi đổi cấu hình trên trang quản trị, giá trị được lưu vào `config.json` và áp dụng ngay. `env` được ưu tiên lúc khởi động — muốn dùng giá trị đã lưu, hãy bỏ biến tương ứng trong `.env`.
 
-## Sử dụng với OBS
+## Trang quản trị phiên (`/admin`)
 
-1. Chạy server (hoặc `DEMO_MODE=true` để xem trước giao diện).
-2. Mở **OBS → Sources → Add → Browser**.
-3. Đặt URL: `http://localhost:3000` (thêm `?bg=dark` nếu muốn nền tối để test, bản overlay thật có nền trong suốt).
-4. Điều chỉnh width/height cho phù hợp scene của bạn.
+Mỗi instance có **1 trang quản trị cục bộ** riêng: mở `http://localhost:3000/admin`, đăng nhập bằng `ADMIN_TOKEN` (nếu để trống, xem log để lấy token tự sinh). Giao diện tiếng Việt, 4 tab:
 
-## Dashboard
+- **Feed** — dòng sự kiện realtime (cmt/quà/tim/follow/...), lọc theo loại, tạm dừng, xóa.
+- **Thống kê** — người xem, cmt, lượt tim, quà, kim cương, thời lượng + top người tặng quà, top tap tim, nút reset.
+- **Client** — danh sách game/client đang nối WebSocket (IP, thời điểm kết nối), nút **Ngắt** từng client.
+- **Cấu hình** — đổi username, `WS_TOKEN`, bật/tắt demo mode, nút kết nối lại TikTok — lưu & áp dụng ngay không cần sửa file.
 
-Mở `http://localhost:3000/dashboard` để:
-- Xem trạng thái kết nối, room ID.
-- Đổi username TikTok, danh sách lệnh, quà nhận diện (giftId) và cooldown lệnh — lưu vào `config.json`, tự reconnect.
-- Theo dõi thống kê phiên (viewers, cmt, like, quà, kim cương, thời lượng), top người tặng quà, sự kiện và lệnh gần đây.
-- Nút **Reset thống kê** để bắt đầu phiên mới.
+Các API quản trị (`/api/admin/*`) và WebSocket admin (`/admin`) đều yêu cầu phiên đăng nhập (cookie 12 giờ).
 
-## Sự kiện hỗ trợ
-
-- **comment** — bình luận, hiển thị dưới góc trái (avatar + tên + nội dung)
-- **gift** — quà tặng, hiển thị to ở giữa với ảnh quà, số lượng, giá diamonds
-- **like** — tim bay lên từ dưới màn hình
-- **follow** / **share** / **member** — thông báo trên đầu màn hình
-
-## Dùng cho game (WebSocket)
-
-Game kết nối tới `ws://localhost:3000` và đọc message:
+## Kết nối từ game (WebSocket)
 
 ```js
-const ws = new WebSocket("ws://localhost:3000");
+const ws = new WebSocket("ws://localhost:3000" + (WS_TOKEN ? `?token=${WS_TOKEN}` : ""));
 ws.onmessage = (e) => {
-  const msg = JSON.parse(e.data);
-  if (msg.type === "command") {
-    const cmd = msg.payload; // { key, user, content, timestamp, ... }
-    if (cmd.key === "vote") { /* làm gì đó với cmd.user */ }
-    if (cmd.key === "gift") { /* cmd.giftName, cmd.diamondCount, cmd.repeatCount */ }
+  const msg = JSON.parse(e.data); // { type: "tiktok", payload: { type, data } }
+  const ev = msg.payload;
+  switch (ev.type) {
+    case "comment": console.log(ev.data.user.nickname, ":", ev.data.content);
+    case "gift":    console.log(ev.data.giftName, "x" + ev.data.repeatCount, ev.data.diamondCount + " diam");
+    case "like":    console.log("+" + ev.data.count, "tim"); // user có thể là null
+    case "follow": case "share": case "member": ...
+    case "viewer":  console.log("viewers:", ev.data.viewerCount);
+    case "status":  console.log("connected:", ev.data.connected, ev.data.roomId);
   }
 };
 ```
 
-Ngoài ra server còn gửi `{ type: "stats" }` (thống kê 2s/lần) và `{ type: "tiktok" }` (mọi event thô: comment/gift/like/follow/...) để game dùng khi cần.
+- Khi client vừa kết nối, server gửi ngay 1 event `status` (connected, username, roomId) để game biết trạng thái.
+- Nếu `WS_TOKEN` không khớp → server đóng kết nối mã `1008 unauthorized`.
+
+### Cấu trúc payload
+
+- `comment` → `{ user: {uniqueId, nickname, avatarUrl}, content, timestamp }`
+- `gift` → `{ user, giftId, giftName, diamondCount, repeatCount, imageUrl, timestamp }`
+- `like` → `{ user | null, count, total, timestamp }` — TikTok gộp like không có user nên `user` **có thể null**; tap 1 lần và double-tap đều cùng loại event, chỉ khác `count` (game không tách được kiểu tap)
+- `follow` / `share` / `member` → `{ user, timestamp }` (+ `memberCount`)
+- `viewer` → `{ viewerCount, timestamp }`
+- `status` → `{ connected, username, roomId?, demoMode? }`
+
+## Health check cho hệ thống quản lý
+
+`GET /api/health` (không cần token):
+
+```json
+{ "ok": true, "uptime": 123, "connected": true, "username": "bar.online5", "roomId": "...", "viewers": 45, "demoMode": false }
+```
+
+## Docker (1 instance / 1 thuê bao)
+
+```bash
+cp .env.example .env    # đặt TIKTOK_USERNAME, ADMIN_TOKEN, WS_TOKEN, PORT
+docker compose up -d --build
+```
+
+Chạy thủ công nhiều thuê bao (mỗi container một port + token riêng):
+
+```bash
+docker run -d -p 3001:3000 \
+  -e TIKTOK_USERNAME=thuebao1 -e WS_TOKEN=token_1 \
+  tiktoklive:latest
+```
+
+Reverse proxy (nginx/caddy) + HTTPS để client WebSocket kết nối qua `wss://`.
 
 ## Ghi chú
 
-- Thư viện `tiktok-live-connector` v2.4.3 (ESM-only) được dùng để kết nối Webcast của TikTok.
-- Cần username **đang live** thì mới kết nối được. Nếu account offline, app tự retry với backoff tối đa 30s.
-- **Nếu gặp lỗi `SignatureMissingTokensError` / "This endpoint requires a Business plan"**: hãy đặt `ENABLE_EXTENDED_GIFT_INFO=false` trong `.env` (mặc định đã là `false`).
-- Có thể dùng `SIGN_API_KEY` từ [eulerstream.com](https://www.eulerstream.com) để ký kết nối ổn định hơn.
+- Thư viện `tiktok-live-connector` v2.4.3 (ESM-only) dùng để kết nối Webcast của TikTok.
+- Cần username **đang live** mới kết nối được. Offline → tự retry backoff tối đa 30s.
+- **Nhiều kết nối đồng thời từ cùng 1 IP dễ bị TikTok rate limit** (backoff 60s→5ph). Chạy nhiều thuê bao nên phân tán nhiều server/IP và dùng `SIGN_API_KEY` Euler Stream cho ký kết nối.
+- Nếu gặp `SignatureMissingTokensError` / "requires a Business plan": đặt `ENABLE_EXTENDED_GIFT_INFO=false` (mặc định đã là `false`).

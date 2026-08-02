@@ -6,50 +6,81 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { TikTokService } from "./tiktok.js";
 import { StatsManager } from "./stats.js";
-import { loadConfig, saveConfig, validateUsername, validateCommands, validateGiftCommands } from "./config.js";
+import { loadConfig, saveConfig, validateUsername, type AppConfig } from "./config.js";
+import {
+  getAdminToken,
+  adminTokenFromEnv,
+  createSession,
+  destroySession,
+  sessionCookie,
+  clearCookie,
+  requireAdmin,
+  isAuthed,
+  pruneSessions,
+} from "./auth.js";
 import { color, C, fmtTime, pad, cell } from "./log.js";
-import type { BroadcastEvent, StatsPayload, UserPayload } from "./types.js";
+import type { AdminWsMessage, BroadcastEvent, ClientInfo, StatusSnapshot, UserPayload } from "./types.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const PORT = Number(process.env.PORT || 3000);
 const SIGN_API_KEY = process.env.SIGN_API_KEY || "";
 const ENABLE_EXTENDED_GIFT_INFO = process.env.ENABLE_EXTENDED_GIFT_INFO === "true";
-const DEMO_MODE = process.env.DEMO_MODE === "true";
 
-const config = loadConfig();
-if (!config.username && !DEMO_MODE) {
-  console.error("Thiếu TIKTOK_USERNAME hoặc config.json chưa có username. Hãy tạo file .env hoặc config.json, hoặc bật DEMO_MODE=true để test giao diện.");
-  process.exit(1);
-}
+let cfg: AppConfig = loadConfig();
 
 const app = express();
 app.use(express.json());
-app.use(express.static(path.join(__dirname, "..", "public")));
+app.use(
+  express.static(path.join(__dirname, "..", "public"), {
+    setHeaders: (res) => {
+      res.setHeader("Cache-Control", "no-store");
+    },
+  })
+);
 
 const server = createServer(app);
-const wss = new WebSocketServer({ server });
 
-const clients = new Set<WebSocket>();
+type AliveSocket = WebSocket & { isAlive?: boolean };
 
-const stats = new StatsManager();
 const tiktok = new TikTokService({
-  username: config.username,
-  commands: config.commands,
-  giftCommands: config.giftCommands,
-  commandCooldownMs: config.commandCooldownMs,
+  username: cfg.username,
   signApiKey: SIGN_API_KEY,
   enableExtendedGiftInfo: ENABLE_EXTENDED_GIFT_INFO,
+  demoMode: cfg.demoMode,
 });
+const stats = new StatsManager();
 
-function broadcast(message: unknown): void {
-  const raw = JSON.stringify(message);
-  for (const client of clients) {
-    if (client.readyState === WebSocket.OPEN) {
-      client.send(raw);
-    }
+let nextClientId = 1;
+interface TrackedClient extends ClientInfo {
+  socket: AliveSocket;
+}
+const gameClients = new Map<number, TrackedClient>();
+const adminClients = new Map<number, TrackedClient>();
+
+// ---------- broadcast ----------
+
+function send(socket: AliveSocket, message: unknown): void {
+  if (socket.readyState === WebSocket.OPEN) {
+    socket.send(JSON.stringify(message));
   }
 }
+
+function broadcastGame(message: unknown): void {
+  const raw = JSON.stringify(message);
+  for (const c of gameClients.values()) {
+    if (c.socket.readyState === WebSocket.OPEN) c.socket.send(raw);
+  }
+}
+
+function broadcastAdmin(message: AdminWsMessage): void {
+  const raw = JSON.stringify(message);
+  for (const c of adminClients.values()) {
+    if (c.socket.readyState === WebSocket.OPEN) c.socket.send(raw);
+  }
+}
+
+// ---------- log ----------
 
 function fmtUser(user: UserPayload | null | undefined): string {
   return user ? `${user.nickname} (@${user.uniqueId})` : "(ẩn danh)";
@@ -74,12 +105,7 @@ function logEvent(event: BroadcastEvent): void {
       break;
     case "gift": {
       const d = event.data;
-      const recognized = tiktok.giftCommands.includes(d.giftId);
-      const name = color(C.bold + C.yellow, d.giftName);
-      const suffix = recognized
-        ? color(C.brightGreen + C.bold, "=> NHAN DIEN LENH")
-        : color(C.dim, "=> overlay");
-      const rest = `${name} x${d.repeatCount} (${color(C.yellow, `${d.diamondCount} diam`)}, id=${color(C.dim, d.giftId)}) ${suffix}`;
+      const rest = `${color(C.bold + C.yellow, d.giftName)} x${d.repeatCount} (${color(C.yellow, `${d.diamondCount} diam`)}, id=${color(C.dim, d.giftId)})`;
       console.log(line("gift", C.yellow, d.user, C.yellow, rest));
       break;
     }
@@ -100,13 +126,6 @@ function logEvent(event: BroadcastEvent): void {
     case "viewer":
       lastViewerCount = event.data.viewerCount;
       break;
-    case "command": {
-      const d = event.data;
-      const extra = d.giftId ? color(C.yellow, ` (gift id=${d.giftId})`) : "";
-      const rest = `key=${color(C.bold + C.green, `"${d.key}"`)}${extra}`;
-      console.log(line("command", C.bold + C.green, d.user, C.green, rest));
-      break;
-    }
     case "status":
       console.log(
         `${color(C.dim, `[${fmtTime()}]`)} ${color(C.bold + C.blue, pad("[status]", TAG_W))} ${color(C.dim, pad("-", USER_W))} ${event.data.connected ? color(C.brightGreen + C.bold, "Ket noi") : color(C.red + C.bold, "Mat ket noi")} ${event.data.username}${event.data.roomId ? color(C.dim, ` (room ${event.data.roomId})`) : ""}`
@@ -118,107 +137,39 @@ function logEvent(event: BroadcastEvent): void {
 function emitEvent(event: BroadcastEvent): void {
   logEvent(event);
   stats.record(event);
-  if (event.type === "command") {
-    broadcast({ type: "command", payload: event.data });
-  } else {
-    broadcast({ type: "tiktok", payload: event });
-  }
+  broadcastGame({ type: "tiktok", payload: event });
+  broadcastAdmin({ type: "tiktok", payload: event });
 }
 
 tiktok.on("event", emitEvent);
 
-function sendStatsTo(client: WebSocket): void {
-  if (client.readyState === WebSocket.OPEN) {
-    client.send(JSON.stringify({ type: "stats", payload: stats.getSnapshot() }));
-  }
+function statusSnapshot(): StatusSnapshot {
+  return {
+    connected: tiktok.connected,
+    username: tiktok.username,
+    roomId: tiktok.roomId,
+    viewers: lastViewerCount,
+    demoMode: cfg.demoMode,
+    uptime: Math.round(process.uptime()),
+  };
 }
 
-wss.on("connection", (socket) => {
-  clients.add(socket);
-  sendStatsTo(socket);
+function sendStatusTo(socket: AliveSocket): void {
+  send(socket, { type: "status", payload: statusSnapshot() });
+}
 
-  socket.on("close", () => clients.delete(socket));
-  socket.on("error", () => clients.delete(socket));
-});
+function statusChanged(): void {
+  broadcastAdmin({ type: "status", payload: statusSnapshot() });
+}
 
-app.get("/api/config", (_req, res) => {
-  res.json({
-    username: tiktok.username,
-    commands: tiktok.commands,
-    giftCommands: tiktok.giftCommands,
-    commandCooldownMs: tiktok.commandCooldownMs,
-    connected: tiktok.connected,
-    roomId: tiktok.roomId,
-  });
-});
+// ---------- demo mode ----------
 
-app.post("/api/config", (req, res) => {
-  const username = String(req.body?.username ?? "").trim();
-  if (!validateUsername(username)) {
-    res.status(400).json({ ok: false, error: "Username không hợp lệ. Chỉ dùng chữ/số, dấu chấm, gạch dưới, gạch ngang (2-30 ký tự)." });
-    return;
-  }
-  const partial: { username: string; commands?: string[]; giftCommands?: string[]; commandCooldownMs?: number } = { username };
-  if (req.body?.commands !== undefined) {
-    const commands = Array.isArray(req.body.commands) ? req.body.commands.map(String).map((s: string) => s.trim()) : [];
-    if (!validateCommands(commands)) {
-      res.status(400).json({ ok: false, error: "Danh sách lệnh không hợp lệ. Mỗi lệnh 1-30 ký tự (chữ/số, khoảng trắng, gạch dưới, gạch ngang)." });
-      return;
-    }
-    partial.commands = commands;
-  }
-  if (req.body?.giftCommands !== undefined) {
-    const giftCommands = Array.isArray(req.body.giftCommands) ? req.body.giftCommands.map(String).map((s: string) => s.trim()) : [];
-    if (!validateGiftCommands(giftCommands)) {
-      res.status(400).json({ ok: false, error: "Danh sách quà nhận diện không hợp lệ. Mỗi mã 1-30 ký tự (chữ/số, khoảng trắng, gạch dưới, gạch ngang)." });
-      return;
-    }
-    partial.giftCommands = giftCommands;
-  }
-  if (req.body?.commandCooldownMs !== undefined) {
-    const ms = Number(req.body.commandCooldownMs);
-    if (!Number.isFinite(ms) || ms < 0 || ms > 60000) {
-      res.status(400).json({ ok: false, error: "Cooldown phải là số mili-giây từ 0 đến 60000 (0 = tắt)." });
-      return;
-    }
-    partial.commandCooldownMs = Math.round(ms);
-  }
-  const next = saveConfig(partial);
-  if (!DEMO_MODE) tiktok.reconfigure({ username: next.username, commands: next.commands, giftCommands: next.giftCommands, commandCooldownMs: next.commandCooldownMs });
-  else {
-    tiktok.setCommands(next.commands);
-    tiktok.setGiftCommands(next.giftCommands);
-    tiktok.setCommandCooldown(next.commandCooldownMs);
-  }
-  res.json({ ok: true, username: next.username, commands: next.commands, giftCommands: next.giftCommands, commandCooldownMs: next.commandCooldownMs });
-  console.log(
-    `${color(C.dim, `[${fmtTime()}]`)} ${color(C.bold + C.magenta, pad("[config]", TAG_W))} ${color(C.dim, pad("-", USER_W))} Da luu: username=${next.username}, commands=[${next.commands.join(", ")}], giftCommands=[${next.giftCommands.join(", ")}], cooldown=${next.commandCooldownMs}ms`
-  );
-});
+let demoTimers: NodeJS.Timeout[] = [];
 
-app.get("/api/stats", (_req, res) => {
-  res.json(stats.getSnapshot());
-});
-
-app.post("/api/stats/reset", (_req, res) => {
-  stats.reset();
-  broadcast({ type: "stats", payload: stats.getSnapshot() });
-  console.log(`${color(C.dim, `[${fmtTime()}]`)} ${color(C.bold + C.yellow, pad("[stats]", TAG_W))} ${color(C.dim, pad("-", USER_W))} Reset thong ke`);
-  res.json({ ok: true });
-});
-
-app.get("/", (_req, res) => {
-  res.sendFile(path.join(__dirname, "..", "public", "index.html"));
-});
-
-app.get("/dashboard", (_req, res) => {
-  res.sendFile(path.join(__dirname, "..", "public", "dashboard.html"));
-});
-
-setInterval(() => {
-  const snapshot: StatsPayload = stats.getSnapshot();
-  broadcast({ type: "stats", payload: snapshot });
-}, 2000);
+function stopDemo(): void {
+  for (const t of demoTimers) clearInterval(t);
+  demoTimers = [];
+}
 
 function startDemo(): void {
   const names = ["Minh Anh", "Bảo Trân", "Quốc Huy", "Lan Phương", "Đức Mạnh", "Hồng Nhung", "Tùng Lâm", "Ngọc Mai"];
@@ -241,105 +192,299 @@ function startDemo(): void {
 
   const randomItem = <T,>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
 
-  const demoLike = (): void => {
-    emitEvent({ type: "like", data: { user: randomItem(users).user, count: 1 + Math.floor(Math.random() * 5), total: 0, timestamp: Date.now() } });
-  };
-  const demoChat = (): void => {
-    emitEvent({ type: "comment", data: { ...randomItem(users), content: randomItem(comments), timestamp: Date.now() } });
-  };
-  const demoGift = (): void => {
-    const recognizedIds = tiktok.giftCommands;
-    const pickRecognized = recognizedIds.length > 0 && Math.random() < 0.5;
-    const matched = pickRecognized
-      ? gifts.find((g) => recognizedIds.includes(g.giftId)) ?? randomItem(gifts)
-      : gifts.find((g) => !recognizedIds.includes(g.giftId)) ?? randomItem(gifts);
-    const repeatCount = 1 + Math.floor(Math.random() * 20);
-    const payload = {
-      user: randomItem(users).user,
-      giftId: matched.giftId,
-      giftName: matched.name,
-      diamondCount: matched.diamondCount,
-      repeatCount,
-      imageUrl: "",
-      timestamp: Date.now(),
-    };
-    emitEvent({ type: "gift", data: payload });
-    if (recognizedIds.includes(matched.giftId)) {
-      emitEvent({
-        type: "command",
-        data: {
-          key: "gift",
-          user: payload.user,
-          content: matched.name,
-          timestamp: payload.timestamp,
-          giftId: matched.giftId,
-          giftName: matched.name,
-          diamondCount: matched.diamondCount,
-          repeatCount,
-        },
-      });
-    }
-  };
-  const demoFollow = (): void => {
-    emitEvent({ type: "follow", data: { ...randomItem(users), timestamp: Date.now() } });
-  };
-  const demoCommand = (): void => {
-    const keys = tiktok.commands;
-    if (keys.length === 0) return;
-    const key = randomItem(keys);
-    const user = randomItem(users).user;
-    emitEvent({
-      type: "command",
-      data: { key, user, content: key, timestamp: Date.now() },
-    });
-  };
-  const demoViewer = (): void => {
-    emitEvent({ type: "viewer", data: { viewerCount: 100 + Math.floor(Math.random() * 400), timestamp: Date.now() } });
-  };
-  const demoMember = (): void => {
-    emitEvent({ type: "member", data: { ...randomItem(users), memberCount: 1 + Math.floor(Math.random() * 30), timestamp: Date.now() } });
+  const push = (event: BroadcastEvent): void => emitEvent(event);
+  const schedule = (fn: () => void, ms: number): void => {
+    demoTimers.push(setInterval(fn, ms));
   };
 
-  setInterval(demoChat, 3000);
-  setInterval(demoGift, 7000);
-  setInterval(demoFollow, 9000);
-  setInterval(demoCommand, 5500);
-  setInterval(demoLike, 800);
-  setInterval(demoViewer, 4000);
-  setInterval(demoMember, 11000);
+  schedule(() => push({ type: "like", data: { user: randomItem(users).user, count: 1 + Math.floor(Math.random() * 5), total: 0, timestamp: Date.now() } }), 800);
+  schedule(() => push({ type: "comment", data: { ...randomItem(users), content: randomItem(comments), timestamp: Date.now() } }), 3000);
+  schedule(() => {
+    const g = randomItem(gifts);
+    push({
+      type: "gift",
+      data: {
+        user: randomItem(users).user,
+        giftId: g.giftId,
+        giftName: g.name,
+        diamondCount: g.diamondCount,
+        repeatCount: 1 + Math.floor(Math.random() * 20),
+        imageUrl: "",
+        timestamp: Date.now(),
+      },
+    });
+  }, 7000);
+  schedule(() => push({ type: "follow", data: { ...randomItem(users), timestamp: Date.now() } }), 9000);
+  schedule(() => push({ type: "viewer", data: { viewerCount: 100 + Math.floor(Math.random() * 400), timestamp: Date.now() } }), 4000);
+  schedule(() => push({ type: "member", data: { ...randomItem(users), memberCount: 1 + Math.floor(Math.random() * 30), timestamp: Date.now() } }), 11000);
 }
+
+function applyDemoMode(on: boolean): void {
+  if (cfg.demoMode === on) return;
+  cfg.demoMode = on;
+  if (on) {
+    tiktok.stop();
+    startDemo();
+  } else {
+    stopDemo();
+    tiktok.reconfigure({ demoMode: false });
+  }
+  statusChanged();
+}
+
+// ---------- WebSocket ----------
+
+function closeWithCode(socket: AliveSocket, code: number, reason: string): void {
+  socket.close(code, reason);
+}
+
+const wssGame = new WebSocketServer({ noServer: true });
+const wssAdmin = new WebSocketServer({ noServer: true });
+
+server.on("upgrade", (req, socket, head) => {
+  const url = new URL(req.url ?? "", "http://localhost");
+  if (url.pathname === "/admin") {
+    if (!isAuthed(req)) {
+      socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
+      socket.destroy();
+      return;
+    }
+    wssAdmin.handleUpgrade(req, socket, head, (ws) => wssAdmin.emit("connection", ws, req));
+    return;
+  }
+  if (cfg.wsToken) {
+    const token = url.searchParams.get("token") ?? "";
+    if (token !== cfg.wsToken) {
+      wssGame.handleUpgrade(req, socket, head, (ws) => {
+        const alive = ws as AliveSocket;
+        alive.isAlive = true;
+        closeWithCode(alive, 1008, "unauthorized");
+      });
+      return;
+    }
+  }
+  wssGame.handleUpgrade(req, socket, head, (ws) => wssGame.emit("connection", ws, req));
+});
+
+function track(clientMap: Map<number, TrackedClient>, socket: AliveSocket, ip: string, kind: "game" | "admin"): number {
+  const id = nextClientId++;
+  const tracked: TrackedClient = { id, socket, ip, connectedAt: Date.now(), kind };
+  clientMap.set(id, tracked);
+  socket.on("close", () => clientMap.delete(id));
+  socket.on("error", () => clientMap.delete(id));
+  return id;
+}
+
+function clientIp(req: { socket?: { remoteAddress?: string } }): string {
+  return req.socket?.remoteAddress?.replace(/^::ffff:/, "") ?? "?";
+}
+
+wssGame.on("connection", (socket, req) => {
+  const alive = socket as AliveSocket;
+  alive.isAlive = true;
+  alive.on("pong", () => {
+    alive.isAlive = true;
+  });
+  track(gameClients, alive, clientIp(req), "game");
+  sendStatusTo(alive);
+  console.log(`${color(C.dim, `[${fmtTime()}]`)} ${color(C.bold + C.magenta, pad("[client]", TAG_W))} ${color(C.dim, pad("-", USER_W))} Game client ket noi tu ${color(C.cyan, clientIp(req))}`);
+});
+
+wssAdmin.on("connection", (socket, req) => {
+  const alive = socket as AliveSocket;
+  alive.isAlive = true;
+  alive.on("pong", () => {
+    alive.isAlive = true;
+  });
+  track(adminClients, alive, clientIp(req), "admin");
+  sendStatusTo(alive);
+  send(alive, { type: "stats", payload: stats.getSnapshot() });
+});
+
+setInterval(() => {
+  pruneSessions();
+  for (const map of [gameClients, adminClients]) {
+    for (const [id, c] of map) {
+      if (!c.socket.isAlive) {
+        c.socket.terminate();
+        map.delete(id);
+        continue;
+      }
+      c.socket.isAlive = false;
+      c.socket.ping();
+    }
+  }
+}, 30000);
+
+setInterval(() => {
+  broadcastAdmin({ type: "stats", payload: stats.getSnapshot() });
+}, 2000);
+
+// ---------- auth routes ----------
+
+app.post("/api/login", (req, res) => {
+  const password = String(req.body?.password ?? "").trim();
+  if (!password || password !== getAdminToken()) {
+    res.status(401).json({ ok: false, error: "Sai mật khẩu." });
+    return;
+  }
+  res.setHeader("Set-Cookie", sessionCookie(createSession()));
+  res.json({ ok: true });
+});
+
+app.post("/api/logout", (req, res) => {
+  destroySession(req);
+  res.setHeader("Set-Cookie", clearCookie());
+  res.json({ ok: true });
+});
+
+// ---------- admin api ----------
+
+app.get("/api/health", (_req, res) => {
+  res.json({
+    ok: true,
+    uptime: statusSnapshot().uptime,
+    connected: tiktok.connected,
+    username: tiktok.username,
+    roomId: tiktok.roomId,
+    viewers: lastViewerCount,
+    demoMode: cfg.demoMode,
+  });
+});
+
+app.get("/api/admin/status", requireAdmin, (_req, res) => {
+  res.json(statusSnapshot());
+});
+
+app.get("/api/admin/config", requireAdmin, (_req, res) => {
+  res.json({ username: cfg.username, wsToken: cfg.wsToken, demoMode: cfg.demoMode, wsTokenEnabled: Boolean(cfg.wsToken) });
+});
+
+app.post("/api/admin/config", requireAdmin, (req, res) => {
+  const partial: Partial<AppConfig> = {};
+  if (req.body?.username !== undefined) {
+    const username = String(req.body.username).trim();
+    if (!validateUsername(username)) {
+      res.status(400).json({ ok: false, error: "Username không hợp lệ. Chỉ dùng chữ/số, dấu chấm, gạch dưới, gạch ngang (2-30 ký tự)." });
+      return;
+    }
+    partial.username = username;
+  }
+  if (req.body?.wsToken !== undefined) {
+    const token = String(req.body.wsToken).trim();
+    if (token.length > 128) {
+      res.status(400).json({ ok: false, error: "WS_TOKEN quá dài (tối đa 128 ký tự)." });
+      return;
+    }
+    partial.wsToken = token;
+  }
+  if (req.body?.demoMode !== undefined) {
+    partial.demoMode = Boolean(req.body.demoMode);
+    if (partial.demoMode === false && !(partial.username ?? cfg.username)) {
+      res.status(400).json({ ok: false, error: "Cần username TikTok để bật live mode." });
+      return;
+    }
+  }
+
+  cfg = saveConfig(partial);
+
+  if (partial.username !== undefined && !cfg.demoMode) {
+    tiktok.reconfigure({ username: partial.username });
+  }
+  if (partial.wsToken !== undefined) {
+    statusChanged();
+  }
+  if (partial.demoMode !== undefined) {
+    applyDemoMode(partial.demoMode);
+  }
+
+  console.log(`${color(C.dim, `[${fmtTime()}]`)} ${color(C.bold + C.magenta, pad("[config]", TAG_W))} ${color(C.dim, pad("-", USER_W))} Da luu: username=${cfg.username}, wsToken=${cfg.wsToken ? "***" : "(rong)"}, demoMode=${cfg.demoMode}`);
+  res.json({ ok: true, ...cfg, wsTokenEnabled: Boolean(cfg.wsToken) });
+});
+
+app.post("/api/admin/reconnect", requireAdmin, (_req, res) => {
+  if (cfg.demoMode) {
+    res.status(400).json({ ok: false, error: "Đang ở demo mode, không cần reconnect." });
+    return;
+  }
+  tiktok.reconfigure({ username: tiktok.username });
+  res.json({ ok: true });
+});
+
+app.get("/api/admin/clients", requireAdmin, (_req, res) => {
+  const list: ClientInfo[] = [
+    ...[...gameClients.values()].map((c) => ({ id: c.id, ip: c.ip, connectedAt: c.connectedAt, kind: c.kind })),
+    ...[...adminClients.values()].map((c) => ({ id: c.id, ip: c.ip, connectedAt: c.connectedAt, kind: c.kind })),
+  ].sort((a, b) => a.connectedAt - b.connectedAt);
+  res.json({ clients: list });
+});
+
+app.post("/api/admin/clients/:id/kick", requireAdmin, (req, res) => {
+  const id = Number(req.params.id);
+  const found = gameClients.get(id) ?? adminClients.get(id);
+  if (!found) {
+    res.status(404).json({ ok: false, error: "Không tìm thấy client." });
+    return;
+  }
+  closeWithCode(found.socket, 1008, "kicked by admin");
+  res.json({ ok: true });
+});
+
+app.get("/api/admin/stats", requireAdmin, (_req, res) => {
+  res.json(stats.getSnapshot());
+});
+
+app.post("/api/admin/stats/reset", requireAdmin, (_req, res) => {
+  stats.reset();
+  broadcastAdmin({ type: "stats", payload: stats.getSnapshot() });
+  console.log(`${color(C.dim, `[${fmtTime()}]`)} ${color(C.bold + C.yellow, pad("[stats]", TAG_W))} ${color(C.dim, pad("-", USER_W))} Reset thong ke`);
+  res.json({ ok: true });
+});
+
+app.get("/admin", (_req, res) => {
+  res.sendFile(path.join(__dirname, "..", "public", "admin.html"));
+});
+
+// ---------- boot ----------
 
 const L = (text: string, colorCode = ""): void => console.log(color(colorCode, text));
 
 function printBanner(): void {
   const bar = color(C.dim, "─".repeat(66));
   L(bar);
-  L(color(C.bold + C.cyan, "  TikTok Live Bridge") + color(C.dim, "   - log realtime & by Thanh Binh IT"));
+  L(color(C.bold + C.cyan, "  TikTok Live Data Bridge") + color(C.dim, "   - WebSocket realtime & admin & by Thanh Binh IT"));
   L(bar);
-  L(`  Overlay:    ${color(C.brightGreen, `http://localhost:${PORT}`)}`);
-  L(`  Dashboard:  ${color(C.brightGreen, `http://localhost:${PORT}/dashboard`)}`);
-  L(`  Username:   ${color(C.cyan, "@" + tiktok.username)}`);
-  L(`  Commands:   ${color(C.green, tiktok.commands.length ? tiktok.commands.join(", ") : "(khong co)")}`);
-  L(`  Gifts:      ${color(C.yellow, tiktok.giftCommands.length ? tiktok.giftCommands.join(", ") : "(khong co)")}`);
-  L(`  Cooldown:   ${color(C.yellow, tiktok.commandCooldownMs + "ms")}`);
-  if (DEMO_MODE) {
-    L(`  Mode:       ${color(C.bold + C.magenta, "DEMO - phat du lieu gia")}`);
-  } else {
-    L(`  Mode:       ${color(C.bold + C.green, "LIVE")}`);
+  L(`  WebSocket:  ${color(C.brightGreen, `ws://localhost:${PORT}`)}` + (cfg.wsToken ? color(C.dim, "  (yeu cau ?token=WS_TOKEN)") : ""));
+  L(`  Admin:      ${color(C.brightGreen, `http://localhost:${PORT}/admin`)}`);
+  if (!adminTokenFromEnv()) {
+    L(color(C.bold + C.yellow, `  ADMIN_TOKEN: ${getAdminToken()}`));
+    L(color(C.dim, "  (mat khau dang nhap /admin - sao chep nguyen vang, khong kem khoang trang)"));
   }
+  L(`  Health:     ${color(C.brightGreen, `http://localhost:${PORT}/api/health`)}`);
+  L(`  Username:   ${color(C.cyan, "@" + tiktok.username)}`);
+  L(`  Mode:       ${cfg.demoMode ? color(C.bold + C.magenta, "DEMO - phat du lieu gia") : color(C.bold + C.green, "LIVE")}`);
   L(bar);
 }
 
 server.listen(PORT, () => {
   printBanner();
-  if (DEMO_MODE) {
+  if (cfg.demoMode) {
     startDemo();
   } else {
     tiktok.start();
   }
 });
 
-process.on("SIGINT", () => {
+process.on("SIGINT", () => shutdown("SIGINT"));
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+
+function shutdown(signal: string): void {
+  console.log(`${color(C.dim, `[${fmtTime()}]`)} ${color(C.bold + C.yellow, pad("[server]", TAG_W))} ${color(C.dim, pad("-", USER_W))} Nhan ${signal}, dang dung...`);
+  stopDemo();
   tiktok.stop();
+  for (const c of [...gameClients.values(), ...adminClients.values()]) {
+    c.socket.terminate();
+  }
   server.close(() => process.exit(0));
-});
+  setTimeout(() => process.exit(0), 5000).unref();
+}
