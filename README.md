@@ -43,12 +43,13 @@ Khi đổi cấu hình trên trang quản trị, giá trị được lưu vào `
 
 ## Trang quản trị phiên (`/admin`)
 
-Mỗi instance có **1 trang quản trị cục bộ** riêng: mở `http://localhost:3000/admin`, đăng nhập bằng `ADMIN_TOKEN` (nếu để trống, xem log để lấy token tự sinh). Giao diện tiếng Việt, 4 tab:
+Mỗi instance có **1 trang quản trị cục bộ** riêng: mở `http://localhost:3000/admin`, đăng nhập bằng `ADMIN_TOKEN` (nếu để trống, xem log để lấy token tự sinh). Giao diện tiếng Việt, 5 tab:
 
 - **Feed** — dòng sự kiện realtime (cmt/quà/tim/follow/...), lọc theo loại, tạm dừng, xóa.
-- **Thống kê** — người xem, cmt, lượt tim, quà, kim cương, thời lượng + top người tặng quà, top tap tim, nút reset.
+- **Thống kê** — người xem, cmt, lượt tim, quà, kim cương, follow, chia sẻ, vào live, thời lượng + top người tặng quà, top tap tim, nút reset.
 - **Client** — danh sách game/client đang nối WebSocket (IP, thời điểm kết nối), nút **Ngắt** từng client.
 - **Cấu hình** — đổi username, `WS_TOKEN`, bật/tắt demo mode, nút kết nối lại TikTok — lưu & áp dụng ngay không cần sửa file.
+- **Hướng dẫn & API** — hướng dẫn sử dụng, link WebSocket theo domain hiện tại (nút copy), cấu trúc payload, API tham chiếu, ghi chú chung.
 
 Các API quản trị (`/api/admin/*`) và WebSocket admin (`/admin`) đều yêu cầu phiên đăng nhập (cookie 12 giờ).
 

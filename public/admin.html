@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Quản trị phiên · TikTok Live Bridge</title>
-  <link rel="stylesheet" href="/admin.css?v=3" />
+  <link rel="stylesheet" href="/admin.css?v=4" />
 </head>
 <body>
   <!-- Login -->
@@ -68,7 +68,7 @@
           </div>
         </div>
         <p class="panel-hint">Dòng sự kiện realtime từ TikTok (hoặc demo). Dùng các nút lọc ở trên để xem theo loại: Cmt / Quà / Tim / Follow / Share / Vào live. <b>Tạm dừng</b> dừng hiển thị nhưng server vẫn ghi dữ liệu; <b>Xóa</b> làm trống danh sách.</p>
-        <div id="feed" class="feed"></div>
+        <div id="feed" class="feed"><div class="feed-empty">Chờ sự kiện từ TikTok hoặc demo mode…</div></div>
       </section>
 
       <!-- Stats -->
@@ -84,6 +84,9 @@
           <div class="stat-card"><div class="stat-num" data-k="likes">0</div><div class="stat-label">Lượt tim</div></div>
           <div class="stat-card"><div class="stat-num" data-k="gifts">0</div><div class="stat-label">Quà tặng</div></div>
           <div class="stat-card"><div class="stat-num" data-k="totalDiamonds">0</div><div class="stat-label">Kim cương</div></div>
+          <div class="stat-card"><div class="stat-num" data-k="follows">0</div><div class="stat-label">Follow</div></div>
+          <div class="stat-card"><div class="stat-num" data-k="shares">0</div><div class="stat-label">Chia sẻ</div></div>
+          <div class="stat-card"><div class="stat-num" data-k="members">0</div><div class="stat-label">Vào live</div></div>
           <div class="stat-card"><div class="stat-num" data-k="sessionSeconds">0</div><div class="stat-label">Thời lượng</div></div>
         </div>
         <div class="two-col">
@@ -107,14 +110,16 @@
       <!-- Clients -->
       <section id="panel-clients" class="panel">
         <div class="panel-head">
-          <h2>Client đang kết nối</h2>
+          <h2>Client đang kết nối <span id="clients-count" class="count-badge">0</span></h2>
           <button id="clients-refresh" class="btn btn-ghost btn-sm">Làm mới</button>
         </div>
         <p class="panel-hint">Danh sách các kết nối WebSocket đang mở tới server. <b>Game</b> = client của bạn (WebSocket công khai); <b>Quản trị</b> = các phiên đăng nhập trang này. Nút <b>Ngắt</b> đóng kết nối của client đó ngay lập tức.</p>
-        <table class="table">
-          <thead><tr><th>ID</th><th>Loại</th><th>IP</th><th>Kết nối lúc</th><th></th></tr></thead>
-          <tbody id="clients-body"></tbody>
-        </table>
+        <div class="table-wrap">
+          <table class="table">
+            <thead><tr><th>ID</th><th>Loại</th><th>IP</th><th>Kết nối lúc</th><th></th></tr></thead>
+            <tbody id="clients-body"></tbody>
+          </table>
+        </div>
         <p class="hint">Game client dùng WebSocket công khai; admin client là chính trang quản trị này.</p>
       </section>
 
@@ -127,8 +132,11 @@
             <input id="cfg-username" type="text" required />
           </label>
           <label class="field">
-            <span>WS_TOKEN (token game cần kèm ?token=)</span>
-            <input id="cfg-wstoken" type="text" placeholder="Để trống = không cần token" />
+            <span>WS_TOKEN (token game cần kèm ?token=) <span id="cfg-wstoken-status" class="pill pill-off">đang tắt</span></span>
+            <div class="input-row">
+              <input id="cfg-wstoken" type="text" placeholder="Để trống = không cần token" autocomplete="off" />
+              <button type="button" class="btn btn-ghost btn-sm" data-copy-input="cfg-wstoken">Copy</button>
+            </div>
           </label>
           <label class="checkbox">
             <input id="cfg-demo" type="checkbox" />
@@ -202,7 +210,8 @@ ws.onmessage = (e) => {
         <div class="card docs-block">
           <h3>Cấu trúc payload</h3>
           <p class="docs-note">Mọi sự kiện gửi tới game đều có dạng <code>{ "type": "tiktok", "payload": { "type": "…", "data": {…} } }</code>.</p>
-          <table class="table">
+          <div class="table-wrap">
+            <table class="table">
             <thead><tr><th>Loại</th><th>Nội dung <code>data</code></th></tr></thead>
             <tbody>
               <tr><td><span class="tag tag-comment">comment</span></td><td><code>{ user, content, timestamp }</code></td></tr>
@@ -215,12 +224,14 @@ ws.onmessage = (e) => {
               <tr><td><span class="tag tag-status">status</span></td><td><code>{ connected, username, roomId?, demoMode? }</code></td></tr>
             </tbody>
           </table>
+          </div>
           <p class="docs-note"><code>user</code> = <code>{ uniqueId, nickname, avatarUrl }</code>. Tap tim 1 lần và double-tap đều cùng loại event, chỉ khác <code>count</code>.</p>
         </div>
 
         <div class="card docs-block">
           <h3>API tham chiếu</h3>
-          <table class="table">
+          <div class="table-wrap">
+            <table class="table">
             <thead><tr><th>Phương thức</th><th>Đường dẫn</th><th>Bảo mật</th><th>Mô tả</th></tr></thead>
             <tbody>
               <tr><td><span class="method">GET</span></td><td><code>/api/health</code></td><td><span class="badge badge-public">Công khai</span></td><td>Kiểm tra sống: uptime, connected, username, roomId, viewers, demoMode.</td></tr>
@@ -238,6 +249,7 @@ ws.onmessage = (e) => {
               <tr><td><span class="method">WS</span></td><td><code>/admin</code></td><td><span class="badge badge-admin">Admin</span></td><td>Nhận status/stats/feed cho trang quản trị (cookie).</td></tr>
             </tbody>
           </table>
+          </div>
           <p class="docs-note">Đường dẫn health check: <code id="docs-health-url"></code></p>
           <p class="docs-note">Lỗi trả về dạng <code>{ "ok": false, "error": "…" }</code>; chưa đăng nhập các route admin trả <b>401</b>.</p>
         </div>
@@ -259,6 +271,6 @@ ws.onmessage = (e) => {
 
   <div id="toast" class="toast hidden"></div>
 
-  <script src="/admin.js?v=3"></script>
+  <script src="/admin.js?v=4"></script>
 </body>
 </html>

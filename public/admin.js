@@ -57,6 +57,8 @@ async function api(path, options = {}) {
 
 function showLogin() {
   state.authed = false;
+  state.ws?.close();
+  state.ws = null;
   $("#app").classList.add("hidden");
   $("#login-screen").classList.remove("hidden");
 }
@@ -100,6 +102,22 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
     try {
       await navigator.clipboard.writeText(text);
       toast("Đã copy: " + text);
+    } catch {
+      toast("Không copy được.");
+    }
+  });
+});
+
+document.querySelectorAll("[data-copy-input]").forEach((btn) => {
+  btn.addEventListener("click", async () => {
+    const text = document.getElementById(btn.dataset.copyInput)?.value ?? "";
+    if (!text) {
+      toast("Trống, không có gì để copy.");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(text);
+      toast("Đã copy WS_TOKEN.");
     } catch {
       toast("Không copy được.");
     }
@@ -181,7 +199,6 @@ function updateStatus(s) {
 // ---------- feed ----------
 
 function feedAdd(ev) {
-  if (state.filter !== "all" && ev.type !== state.filter) return;
   if (state.paused) return;
 
   const feed = $("#feed");
@@ -190,6 +207,8 @@ function feedAdd(ev) {
 
   const row = document.createElement("div");
   row.className = "feed-item";
+  row.dataset.type = ev.type;
+  if (state.filter !== "all" && ev.type !== state.filter) row.style.display = "none";
 
   const tag = document.createElement("span");
   tag.className = `feed-tag ${ev.type}`;
@@ -234,22 +253,37 @@ function feedAdd(ev) {
     user.className = "feed-user";
     user.textContent = ev.data.user.nickname;
     body.append(user, ` vào live (${ev.data.memberCount} người xem)`);
+  } else if (ev.type === "viewer") {
+    body.textContent = `Người xem: ${ev.data.viewerCount}`;
   } else if (ev.type === "status") {
-    body.textContent = ev.data.connected ? "Đã kết nối TikTok" : "Mất kết nối";
+    body.textContent = ev.data.demoMode ? "Đang chạy demo mode" : ev.data.connected ? "Đã kết nối TikTok" : "Mất kết nối";
   } else {
     body.textContent = JSON.stringify(ev.data);
   }
 
   row.appendChild(body);
   feed.prepend(row);
-  while (feed.children.length > 300) feed.lastChild.remove();
+  const items = feed.querySelectorAll(".feed-item");
+  if (items.length > 300) items[items.length - 1].remove();
+}
+
+function applyFeedFilter() {
+  const feed = $("#feed");
+  let visible = 0;
+  feed.querySelectorAll(".feed-item").forEach((item) => {
+    const show = state.filter === "all" || item.dataset.type === state.filter;
+    item.style.display = show ? "" : "none";
+    if (show) visible++;
+  });
+  feed.querySelector(".feed-empty")?.remove();
+  if (!visible) feed.insertAdjacentHTML("beforeend", '<div class="feed-empty">Chưa có sự kiện</div>');
 }
 
 document.querySelectorAll(".filter").forEach((f) => {
   f.addEventListener("click", () => {
     document.querySelectorAll(".filter").forEach((x) => x.classList.toggle("active", x === f));
     state.filter = f.dataset.filter;
-    renderFeedFromStats();
+    applyFeedFilter();
   });
 });
 
@@ -261,30 +295,6 @@ $("#feed-pause").addEventListener("click", (e) => {
 $("#feed-clear").addEventListener("click", () => {
   $("#feed").innerHTML = '<div class="feed-empty">Chưa có sự kiện</div>';
 });
-
-function renderFeedFromStats() {
-  if (!state.stats) return;
-  $("#feed").innerHTML = "";
-  const events = [...state.stats.recentEvents].reverse().filter((r) => {
-    if (state.filter === "all") return true;
-    return r.type === state.filter || (state.filter === "gift" && r.type === "gift");
-  });
-  events.forEach((r) => {
-    const ev = {
-      type: r.type,
-      data: {
-        user: r.user,
-        content: r.content,
-        giftName: r.giftName,
-        diamondCount: r.diamondCount,
-        repeatCount: r.repeatCount,
-        timestamp: r.timestamp,
-      },
-    };
-    feedAdd(ev);
-  });
-  if (!events.length) $("#feed").innerHTML = '<div class="feed-empty">Chưa có sự kiện</div>';
-}
 
 // ---------- stats ----------
 
@@ -330,6 +340,7 @@ async function refreshClients() {
   try {
     const data = await api("/api/admin/clients");
     const body = $("#clients-body");
+    $("#clients-count").textContent = data.clients.length;
     body.innerHTML = data.clients.length
       ? data.clients
           .map(
@@ -373,6 +384,10 @@ async function loadConfigForm() {
     $("#cfg-wstoken").value = c.wsToken;
     $("#cfg-demo").checked = c.demoMode;
     updateWsTokenNote(c.wsTokenEnabled);
+    const pill = $("#cfg-wstoken-status");
+    pill.textContent = c.wsTokenEnabled ? "đang bật" : "đang tắt";
+    pill.classList.toggle("pill-on", Boolean(c.wsTokenEnabled));
+    pill.classList.toggle("pill-off", !c.wsTokenEnabled);
   } catch {
     /* ignore */
   }
