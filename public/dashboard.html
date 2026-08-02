@@ -25,6 +25,12 @@
             <input id="username-input" type="text" placeholder="vd: nhn.3021" autocomplete="off" required />
             <button id="save-btn" type="submit" class="btn">Lưu</button>
           </div>
+          <label for="commands-input">Lệnh nhận diện (cách nhau bằng dấu phẩy)</label>
+          <input id="commands-input" type="text" placeholder="vd: start, vote, help" autocomplete="off" />
+          <label for="giftcommands-input">Quà nhận diện - giftId (cách nhau bằng dấu phẩy)</label>
+          <input id="giftcommands-input" type="text" placeholder="vd: 1005, 1006" autocomplete="off" />
+          <label for="cooldown-input">Cooldown lệnh (ms, 0 = tắt)</label>
+          <input id="cooldown-input" type="number" min="0" max="60000" step="100" placeholder="3000" autocomplete="off" />
           <p id="config-msg" class="dash-msg"></p>
         </form>
         <div class="dash-meta">
@@ -60,6 +66,7 @@
             <span class="stat-label">⏱ Phiên</span>
           </div>
         </div>
+        <button id="reset-stats-btn" class="btn btn-secondary">Reset thống kê</button>
       </div>
     </section>
 
@@ -80,6 +87,10 @@
         <h2>Sự kiện gần đây</h2>
         <ul id="recent-feed" class="dash-feed">
           <li class="dash-empty">Chưa có sự kiện</li>
+        </ul>
+        <h2 style="margin-top:16px">Lệnh nhận diện gần đây</h2>
+        <ul id="command-feed" class="dash-feed">
+          <li class="dash-empty">Chưa có lệnh</li>
         </ul>
       </div>
     </section>

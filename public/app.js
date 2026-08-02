@@ -61,13 +61,13 @@
         spawnHearts(ev.data);
         break;
       case "follow":
-        addNotification(ev.data, "Đã theo dõi", "💙");
+        addNotification(ev.data.user, "Đã theo dõi", "💙");
         break;
       case "share":
-        addNotification(ev.data, "Đã chia sẻ", "🔄");
+        addNotification(ev.data.user, "Đã chia sẻ", "🔄");
         break;
       case "member":
-        addNotification(ev.data, "Đã tham gia live", "👋");
+        addNotification(ev.data.user, "Đã tham gia live", "👋");
         break;
       case "status":
         handleStatus(ev.data);
@@ -84,6 +84,7 @@
   }
 
   function setStatus(state, text) {
+    statusBar.hidden = false;
     statusBar.classList.remove("connected", "disconnected", "connecting");
     statusBar.classList.add(state);
     statusText.textContent = text;

@@ -5,6 +5,9 @@
     statusDot: $("dash-status-dot"),
     statusText: $("dash-status-text"),
     username: $("username-input"),
+    commands: $("commands-input"),
+    giftCommands: $("giftcommands-input"),
+    cooldown: $("cooldown-input"),
     roomId: $("room-id"),
     configMsg: $("config-msg"),
     statViewers: $("stat-viewers"),
@@ -15,6 +18,7 @@
     statDuration: $("stat-duration"),
     topSenders: $("top-senders-body"),
     recentFeed: $("recent-feed"),
+    commandFeed: $("command-feed"),
   };
 
   let statsTimer = null;
@@ -74,7 +78,7 @@
         if (e.type === "comment") {
           li.innerHTML = `<span class="feed-tag feed-cmt">💬</span> <strong>${escapeHtml(e.user.nickname || e.user.uniqueId)}</strong>: ${escapeHtml(e.content ?? "")}`;
         } else {
-          li.innerHTML = `<span class="feed-tag feed-gift">🎁</span> <strong>${escapeHtml(e.user.nickname || e.user.uniqueId)}</strong> tặng <strong>${escapeHtml(e.giftName ?? "")}</strong> x${e.repeatCount ?? 1} (${e.diamondCount ?? 0}💎)`;
+          li.innerHTML = `<span class="feed-tag feed-gift">🎁</span> <strong>${escapeHtml(e.user.nickname || e.user.uniqueId)}</strong> tặng <strong>${escapeHtml(e.giftName ?? "")}</strong> x${e.repeatCount ?? 1} (${e.diamondCount ?? 0}💎) <span class="dash-giftid">#${escapeHtml(e.giftId ?? "")}</span>`;
         }
         els.recentFeed.appendChild(li);
       });
@@ -97,6 +101,18 @@
     }
   }
 
+  const MAX_COMMAND_ITEMS = 20;
+  function addCommand(payload) {
+    if (els.commandFeed.querySelector(".dash-empty")) els.commandFeed.innerHTML = "";
+    const li = document.createElement("li");
+    li.innerHTML = `<span class="feed-tag">⚡</span> <strong>${escapeHtml(payload.key)}</strong> - <strong>${escapeHtml(payload.user.nickname || payload.user.uniqueId)}</strong>` +
+      (payload.giftName ? ` - 🎁 ${escapeHtml(payload.giftName)} x${payload.repeatCount ?? 1} (${payload.diamondCount ?? 0}💎) <span class="dash-giftid">#${escapeHtml(payload.giftId ?? "")}</span>` : "");
+    els.commandFeed.prepend(li);
+    while (els.commandFeed.children.length > MAX_COMMAND_ITEMS) {
+      els.commandFeed.removeChild(els.commandFeed.lastChild);
+    }
+  }
+
   function connect() {
     const proto = location.protocol === "https:" ? "wss" : "ws";
     const ws = new WebSocket(`${proto}://${location.host}`);
@@ -110,6 +126,7 @@
       }
       if (msg.type === "tiktok") handleTiktok(msg.payload);
       if (msg.type === "stats") renderStats(msg.payload);
+      if (msg.type === "command") addCommand(msg.payload);
     };
 
     ws.onclose = () => {
@@ -124,6 +141,9 @@
     const res = await fetch("/api/config");
     const data = await res.json();
     els.username.value = data.username ?? "";
+    els.commands.value = Array.isArray(data.commands) ? data.commands.join(", ") : "";
+    els.giftCommands.value = Array.isArray(data.giftCommands) ? data.giftCommands.join(", ") : "";
+    els.cooldown.value = data.commandCooldownMs ?? 3000;
     els.roomId.textContent = data.roomId ?? "-";
     if (data.connected) setStatus("connected", `Đang kết nối @${data.username}`);
     else setStatus("connecting", "Đang kết nối TikTok...");
@@ -137,15 +157,18 @@
     els.configMsg.className = "dash-msg";
     els.configMsg.textContent = "";
     try {
+      const commands = els.commands.value.split(",").map((s) => s.trim()).filter(Boolean);
+      const giftCommands = els.giftCommands.value.split(",").map((s) => s.trim()).filter(Boolean);
+      const commandCooldownMs = Math.max(0, Number(els.cooldown.value) || 0);
       const res = await fetch("/api/config", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username: els.username.value.trim() }),
+        body: JSON.stringify({ username: els.username.value.trim(), commands, giftCommands, commandCooldownMs }),
       });
       const data = await res.json();
       if (res.ok) {
         els.configMsg.className = "dash-msg ok";
-        els.configMsg.textContent = `Đã lưu @${data.username}. Đang kết nối lại...`;
+        els.configMsg.textContent = `Đã lưu @${data.username} (${data.commands.length} lệnh, ${data.giftCommands.length} quà, cooldown ${data.commandCooldownMs}ms). Đang kết nối lại...`;
         setStatus("connecting", "Đang kết nối lại...");
       } else {
         els.configMsg.className = "dash-msg error";
@@ -162,4 +185,12 @@
 
   loadConfig();
   connect();
+
+  document.getElementById("reset-stats-btn").addEventListener("click", async () => {
+    try {
+      await fetch("/api/stats/reset", { method: "POST" });
+    } catch {
+      /* stats sẽ tự cập nhật qua WS */
+    }
+  });
 })();

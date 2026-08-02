@@ -1,7 +1,8 @@
-import type { BroadcastEvent, StatsPayload, TopSender, RecentEvent } from "./types.js";
+import type { BroadcastEvent, StatsPayload, TopSender, TopLiker, RecentEvent } from "./types.js";
 
 const RECENT_EVENT_LIMIT = 30;
 const TOP_SENDER_LIMIT = 10;
+const TOP_LIKER_LIMIT = 10;
 
 export class StatsManager {
   private viewers = 0;
@@ -65,6 +66,7 @@ export class StatsManager {
         this.pushRecent({
           type: "gift",
           user: d.user,
+          giftId: d.giftId,
           giftName: d.giftName,
           diamondCount: d.diamondCount,
           repeatCount: d.repeatCount,

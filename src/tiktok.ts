@@ -24,7 +24,10 @@ import type {
   SharePayload,
   MemberPayload,
   ViewerPayload,
+  CommandPayload,
 } from "./types.js";
+import { CommandMatcher, GIFT_KEY } from "./commands.js";
+import { color, C, fmtTime, pad } from "./log.js";
 
 type EventMap = { [key: string]: (...args: never[]) => void };
 interface TypedEmitter<Events extends EventMap> {
@@ -35,6 +38,9 @@ type TikTokConn = InstanceType<typeof TikTokLiveConnection> & TypedEmitter<Clien
 
 export interface TikTokServiceOptions {
   username: string;
+  commands?: string[];
+  giftCommands?: string[];
+  commandCooldownMs?: number;
   signApiKey?: string;
   enableExtendedGiftInfo?: boolean;
 }
@@ -43,10 +49,21 @@ function avatarUrl(user: { avatarThumb?: { urlList?: string[] } } | undefined): 
   return user?.avatarThumb?.urlList?.[0] ?? user?.avatarThumb?.urlList?.[1] ?? "";
 }
 
+function isRateLimitError(err: unknown): boolean {
+  return /retry-after|rate\s*limit/i.test(String((err as Error)?.message ?? err));
+}
+
 export class TikTokService extends EventEmitter {
   private connection: TikTokConn | null = null;
   private options: TikTokServiceOptions;
+  private matcher = new CommandMatcher();
+  private giftIds = new Set<string>();
+  private lastCommandAt = new Map<string, number>();
   private reconnectDelay = 1500;
+  private readonly MAX_RECONNECT_DELAY = 30000;
+  private rateLimitDelay = 60000;
+  private readonly MAX_RATE_LIMIT_DELAY = 5 * 60_000;
+  private rateLimited = false;
   private manualDisconnect = false;
   private reconnectTimer: NodeJS.Timeout | null = null;
   private connectPromise: Promise<void> | null = null;
@@ -57,6 +74,8 @@ export class TikTokService extends EventEmitter {
   constructor(options: TikTokServiceOptions) {
     super();
     this.options = options;
+    this.setCommands(options.commands ?? []);
+    this.setGiftCommands(options.giftCommands ?? []);
   }
 
   get username(): string {
@@ -79,11 +98,57 @@ export class TikTokService extends EventEmitter {
     this.connected = false;
   }
 
-  reconfigure(username: string): void {
+  reconfigure(opts: { username?: string; commands?: string[]; giftCommands?: string[]; commandCooldownMs?: number }): void {
     this.stop();
-    this.options.username = username;
+    if (opts.username) this.options.username = opts.username;
+    if (opts.commands) this.setCommands(opts.commands);
+    if (opts.giftCommands) this.setGiftCommands(opts.giftCommands);
+    if (opts.commandCooldownMs !== undefined) this.setCommandCooldown(opts.commandCooldownMs);
     this.emitStatus();
     this.start();
+  }
+
+  setCommands(commands: string[]): void {
+    this.options.commands = commands;
+    this.matcher.setCommands(commands);
+  }
+
+  get commands(): string[] {
+    return this.options.commands ?? [];
+  }
+
+  setGiftCommands(giftCommands: string[]): void {
+    this.options.giftCommands = giftCommands;
+    this.giftIds = new Set(giftCommands.map((g) => String(g).trim()).filter(Boolean));
+  }
+
+  get giftCommands(): string[] {
+    return this.options.giftCommands ?? [];
+  }
+
+  setCommandCooldown(ms: number): void {
+    this.options.commandCooldownMs = ms;
+    this.lastCommandAt.clear();
+  }
+
+  get commandCooldownMs(): number {
+    return this.options.commandCooldownMs ?? 0;
+  }
+
+  canEmitCommand(uniqueId: string, key: string, now = Date.now()): boolean {
+    const cooldownMs = this.commandCooldownMs;
+    if (cooldownMs <= 0) return true;
+    const cmdKey = `${uniqueId}:${key}`;
+    const lastAt = this.lastCommandAt.get(cmdKey);
+    if (lastAt === undefined) {
+      this.lastCommandAt.set(cmdKey, now);
+      return true;
+    }
+    if (now - lastAt >= cooldownMs) {
+      this.lastCommandAt.set(cmdKey, now);
+      return true;
+    }
+    return false;
   }
 
   private async connect(): Promise<void> {
@@ -91,7 +156,7 @@ export class TikTokService extends EventEmitter {
 
     this.emitStatus();
     const rawConn = new TikTokLiveConnection(this.options.username, {
-      enableExtendedGiftInfo: this.options.enableExtendedGiftInfo ?? true,
+      enableExtendedGiftInfo: this.options.enableExtendedGiftInfo ?? false,
       processInitialData: false,
       ...(this.options.signApiKey ? { signApiKey: this.options.signApiKey } : {}),
     });
@@ -104,17 +169,25 @@ export class TikTokService extends EventEmitter {
       .then((state) => {
         this.connected = true;
         this.reconnectDelay = 1500;
+        this.rateLimitDelay = 60000;
+        this.rateLimited = false;
         this.roomId = state.roomId;
-        console.log(`[tiktok] Connected to room ${state.roomId} (${this.options.username})`);
+        console.log(`${color(C.dim, `[${fmtTime()}]`)} ${color(C.bold + C.green, pad("[tiktok]", 9))} ${color(C.dim, pad("-", 24))} Connected to room ${color(C.brightGreen, state.roomId)} (${this.options.username})`);
         this.emitStatus();
       })
       .catch((err) => {
-        if (err instanceof PremiumFeatureError || err instanceof SignatureMissingTokensError) {
+        const rateLimited = isRateLimitError(err);
+        this.rateLimited = rateLimited;
+        if (rateLimited) {
           console.error(
-            "[tiktok] Kết nối thất bại do cần Euler Stream Business plan khi bật ENABLE_EXTENDED_GIFT_INFO=true. Hãy đặt ENABLE_EXTENDED_GIFT_INFO=false trong .env rồi chạy lại."
+            `${color(C.bold + C.yellow, "TIKTOK")}: ${color(C.red + C.bold, "dang gioi han ket noi (rate limit)")}. Ket noi qua nhieu lan lien tiep. Se thu lai sau ~${Math.round(this.rateLimitDelay / 1000)}s. Khoi dong lai server hoac doi vai phut de het gioi han.`
+          );
+        } else if (err instanceof PremiumFeatureError || err instanceof SignatureMissingTokensError) {
+          console.error(
+            `${color(C.red + C.bold, "LOI")}: can Euler Stream Business plan khi bat ENABLE_EXTENDED_GIFT_INFO=true. Hay dat ENABLE_EXTENDED_GIFT_INFO=false trong .env roi chay lai.`
           );
         } else {
-          console.error(`[tiktok] Connect failed: ${err?.message ?? err}`);
+          console.error(`${color(C.red + C.bold, "LOI")}: Connect failed: ${err?.message ?? err}`);
         }
         this.connected = false;
         this.emitStatus();
@@ -134,7 +207,7 @@ export class TikTokService extends EventEmitter {
     });
 
     conn.on(ControlEvent.DISCONNECTED, ({ code, reason }) => {
-      console.warn(`[tiktok] Disconnected (${code})${reason ? `: ${reason}` : ""}`);
+      console.warn(`${color(C.dim, `[${fmtTime()}]`)} ${color(C.bold + C.yellow, pad("[tiktok]", 9))} ${color(C.dim, pad("-", 24))} Disconnected (${code})${reason ? `: ${reason}` : ""}`);
       this.connected = false;
       this.roomId = null;
       this.emitStatus();
@@ -142,7 +215,7 @@ export class TikTokService extends EventEmitter {
     });
 
     conn.on(ControlEvent.ERROR, ({ info, exception }) => {
-      console.error(`[tiktok] Error: ${info}`, exception);
+      console.error(`${color(C.red + C.bold, "LOI")}: ${info}`, exception);
       this.connected = false;
       this.emitStatus();
     });
@@ -159,6 +232,17 @@ export class TikTokService extends EventEmitter {
         timestamp: Date.now(),
       };
       this.emit("event", { type: "comment", data: payload } satisfies BroadcastEvent);
+
+      const matchedKey = this.matcher.match(data.content);
+      if (matchedKey && this.canEmitCommand(payload.user.uniqueId, matchedKey)) {
+        const commandPayload: CommandPayload = {
+          key: matchedKey,
+          user: payload.user,
+          content: data.content,
+          timestamp: payload.timestamp,
+        };
+        this.emit("event", { type: "command", data: commandPayload } satisfies BroadcastEvent);
+      }
     });
 
     conn.on(WebcastEvent.GIFT, (data: WebcastGiftMessage) => {
@@ -188,6 +272,20 @@ export class TikTokService extends EventEmitter {
         timestamp: Date.now(),
       };
       this.emit("event", { type: "gift", data: payload } satisfies BroadcastEvent);
+
+      if (this.giftIds.has(payload.giftId)) {
+        const commandPayload: CommandPayload = {
+          key: GIFT_KEY,
+          user: payload.user,
+          content: giftName,
+          timestamp: payload.timestamp,
+          giftId: payload.giftId,
+          giftName,
+          diamondCount,
+          repeatCount: payload.repeatCount,
+        };
+        this.emit("event", { type: "command", data: commandPayload } satisfies BroadcastEvent);
+      }
     });
 
     conn.on(WebcastEvent.LIKE, (data: WebcastLikeMessage) => {
@@ -261,13 +359,24 @@ export class TikTokService extends EventEmitter {
     if (this.manualDisconnect) return;
     if (this.reconnectTimer) return;
 
-    console.log(`[tiktok] Reconnecting in ${this.reconnectDelay / 1000}s...`);
+    const isRateLimited = this.rateLimited;
+    const baseDelay = isRateLimited ? this.rateLimitDelay : this.reconnectDelay;
+    const jitter = Math.floor(Math.random() * 3000);
+    const delay = baseDelay + jitter;
+
+    console.log(
+      `${color(C.dim, `[${fmtTime()}]`)} ${color(C.bold + C.yellow, pad("[tiktok]", 9))} ${color(C.dim, pad("-", 24))} Reconnecting in ${(delay / 1000).toFixed(1)}s...${isRateLimited ? color(C.yellow, " (rate limit - doi lau hon)") : ""}`
+    );
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
       if (!this.manualDisconnect) void this.connect();
-    }, this.reconnectDelay);
+    }, delay);
 
-    this.reconnectDelay = Math.min(this.reconnectDelay * 2, 30000);
+    if (isRateLimited) {
+      this.rateLimitDelay = Math.min(this.rateLimitDelay * 2, this.MAX_RATE_LIMIT_DELAY);
+    } else {
+      this.reconnectDelay = Math.min(this.reconnectDelay * 2, this.MAX_RECONNECT_DELAY);
+    }
   }
 
   private emitStatus(): void {

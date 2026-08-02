@@ -419,9 +419,14 @@ body.bg-dark {
   gap: 8px;
 }
 
-#username-input {
-  flex: 1;
+#username-input,
+#commands-input,
+#giftcommands-input,
+#cooldown-input {
+  width: 100%;
+  box-sizing: border-box;
   padding: 8px 12px;
+  margin-top: 4px;
   border-radius: 8px;
   border: 1px solid #374151;
   background: #111827;
@@ -429,9 +434,18 @@ body.bg-dark {
   font-size: 14px;
 }
 
-#username-input:focus {
+#username-input:focus,
+#commands-input:focus,
+#giftcommands-input:focus,
+#cooldown-input:focus {
   outline: none;
   border-color: #25f4ee;
+}
+
+#username-input {
+  flex: 1;
+  margin-top: 0;
+  width: auto;
 }
 
 .btn {
@@ -442,6 +456,17 @@ body.bg-dark {
   color: #111827;
   font-weight: 700;
   cursor: pointer;
+}
+
+.btn-secondary {
+  background: #374151;
+  color: #e5e7eb;
+  margin-top: 12px;
+  width: 100%;
+}
+
+.btn-secondary:hover {
+  background: #4b5563;
 }
 
 .btn:disabled {
@@ -544,4 +569,10 @@ body.bg-dark {
   color: #6b7280;
   text-align: center;
   padding: 12px 0;
+}
+
+.dash-giftid {
+  color: #9ca3af;
+  font-size: 11px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
