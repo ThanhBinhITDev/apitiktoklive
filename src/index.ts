@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { TikTokService } from "./tiktok.js";
 import { StatsManager } from "./stats.js";
 import { loadConfig, saveConfig, validateUsername, type AppConfig } from "./config.js";
+import { getGameConfig, isValidGame, listGames, resetGameConfig, setGameConfig } from "./games.js";
 import {
   getAdminToken,
   adminTokenFromEnv,
@@ -159,7 +160,9 @@ function sendStatusTo(socket: AliveSocket): void {
 }
 
 function statusChanged(): void {
-  broadcastAdmin({ type: "status", payload: statusSnapshot() });
+  const status: AdminWsMessage = { type: "status", payload: statusSnapshot() };
+  broadcastAdmin(status);
+  broadcastGame(status);
 }
 
 // ---------- demo mode ----------
@@ -287,6 +290,19 @@ wssGame.on("connection", (socket, req) => {
   });
   track(gameClients, alive, clientIp(req), "game");
   sendStatusTo(alive);
+  alive.on("message", (raw) => {
+    let msg: unknown;
+    try {
+      msg = JSON.parse(raw.toString());
+    } catch {
+      return;
+    }
+    const m = msg as { type?: string; game?: string };
+    if (m?.type === "getConfig" && typeof m.game === "string" && isValidGame(m.game)) {
+      const config = getGameConfig(m.game);
+      if (config) send(alive, { type: "gameConfig", game: m.game, payload: config });
+    }
+  });
   console.log(`${color(C.dim, `[${fmtTime()}]`)} ${color(C.bold + C.magenta, pad("[client]", TAG_W))} ${color(C.dim, pad("-", USER_W))} Game client ket noi tu ${color(C.cyan, clientIp(req))}`);
 });
 
@@ -439,6 +455,47 @@ app.post("/api/admin/stats/reset", requireAdmin, (_req, res) => {
   broadcastAdmin({ type: "stats", payload: stats.getSnapshot(true) });
   console.log(`${color(C.dim, `[${fmtTime()}]`)} ${color(C.bold + C.yellow, pad("[stats]", TAG_W))} ${color(C.dim, pad("-", USER_W))} Reset thong ke`);
   res.json({ ok: true });
+});
+
+// ---------- game config ----------
+
+function broadcastGameConfig(id: string): void {
+  const config = getGameConfig(id);
+  if (!config) return;
+  broadcastGame({ type: "gameConfig", game: id, payload: config });
+}
+
+app.get("/api/admin/games", requireAdmin, (_req, res) => {
+  res.json({
+    games: listGames().map((g) => ({ id: g.id, name: g.name, description: g.description, url: g.url, config: getGameConfig(g.id) })),
+  });
+});
+
+app.put("/api/admin/games/:id/config", requireAdmin, (req, res) => {
+  const id = req.params.id;
+  if (!isValidGame(id)) {
+    res.status(404).json({ ok: false, error: "Không tìm thấy game." });
+    return;
+  }
+  const config = setGameConfig(id, req.body);
+  if (!config) {
+    res.status(400).json({ ok: false, error: "Cấu hình không hợp lệ." });
+    return;
+  }
+  broadcastGameConfig(id);
+  console.log(`${color(C.dim, `[${fmtTime()}]`)} ${color(C.bold + C.magenta, pad("[game]", TAG_W))} ${color(C.dim, pad("-", USER_W))} Da luu cau hinh game ${id}`);
+  res.json({ ok: true, config });
+});
+
+app.post("/api/admin/games/:id/reset", requireAdmin, (req, res) => {
+  const id = req.params.id;
+  if (!isValidGame(id)) {
+    res.status(404).json({ ok: false, error: "Không tìm thấy game." });
+    return;
+  }
+  const config = resetGameConfig(id);
+  broadcastGameConfig(id);
+  res.json({ ok: true, config });
 });
 
 app.get("/admin", (_req, res) => {

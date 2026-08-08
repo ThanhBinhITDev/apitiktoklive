@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Quản trị phiên · TikTok Live Bridge</title>
-  <link rel="stylesheet" href="/admin.css?v=6" />
+  <link rel="stylesheet" href="/admin.css?v=9" />
 </head>
 <body>
   <!-- Login -->
@@ -46,6 +46,7 @@
       <button class="tab" data-tab="stats">Thống kê</button>
       <button class="tab" data-tab="clients">Client</button>
       <button class="tab" data-tab="config">Cấu hình</button>
+      <button class="tab" data-tab="game">Game</button>
       <button class="tab" data-tab="docs">Hướng dẫn & API</button>
     </nav>
 
@@ -163,6 +164,305 @@
         </div>
       </section>
 
+      <!-- Game settings -->
+      <section id="panel-game" class="panel">
+        <div class="panel-head">
+          <h2>Cài đặt game</h2>
+          <div class="game-actions">
+            <button id="game-reset" class="btn btn-danger btn-sm">Khôi phục mặc định</button>
+            <button id="game-save" class="btn btn-primary btn-sm">Lưu cài đặt</button>
+          </div>
+        </div>
+        <p class="panel-hint">Tham số vận hành của game. Thay đổi áp dụng <b>ngay lập tức</b> cho trang game đang mở (không cần tải lại).</p>
+        <div class="ws-url-row">
+          <code id="game-url" class="ws-url"></code>
+          <button class="btn btn-ghost btn-sm" data-copy="game-url">Copy</button>
+        </div>
+        <div id="game-config">
+          <div class="cfg-group">
+            <h3>Phòng đấu</h3>
+            <div class="cfg-grid">
+              <div class="cfg-field">
+                <label for="cfg-join-keyword">Keyword vào phòng</label>
+                <input id="cfg-join-keyword" type="text" data-path="join.keyword" placeholder="Để trống = mọi comment" />
+                <span class="cfg-hint">Chỉ comment chứa keyword này mới vào được. Trống = mọi comment đều vào phòng.</span>
+              </div>
+              <div class="cfg-field">
+                <label for="cfg-join-max">Số người tối đa</label>
+                <input id="cfg-join-max" type="number" min="1" data-path="join.maxPlayers" />
+                <span class="cfg-hint">Giới hạn người chơi cùng lúc trên sân.</span>
+              </div>
+              <div class="cfg-field">
+                <label for="cfg-join-hp">Máu mặc định (điểm)</label>
+                <input id="cfg-join-hp" type="number" min="1" data-path="join.defaultHp" />
+                <span class="cfg-hint">Điểm số mỗi người chơi khi vào phòng, VD 400.</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="cfg-group">
+            <h3>Vòng đấu</h3>
+            <div class="cfg-grid">
+              <div class="cfg-field">
+                <label for="cfg-arena-dur">Thời lượng vòng (giây)</label>
+                <input id="cfg-arena-dur" type="number" min="0" data-path="arena.roundDurationSec" />
+                <span class="cfg-hint">0 = không giới hạn, ai còn đứng cuối cùng thắng. Hết giờ ai còn máu cao nhất thắng.</span>
+              </div>
+              <div class="cfg-field">
+                <label for="cfg-arena-count">Đếm ngược reset (giây)</label>
+                <input id="cfg-arena-count" type="number" min="0" data-path="arena.resetCountdownSec" />
+                <span class="cfg-hint">Thời gian chờ trước khi vòng mới tự bắt đầu.</span>
+              </div>
+              <div class="cfg-field">
+                <label for="cfg-arena-speed">Tốc độ chạy</label>
+                <input id="cfg-arena-speed" type="number" min="0" data-path="arena.movementSpeed" />
+                <span class="cfg-hint">Tốc độ người chơi tự di chuyển (px/giây theo toạ độ màn hình game).</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="cfg-group">
+            <h3>Màn hình game</h3>
+            <div class="cfg-grid">
+              <div class="cfg-field">
+                <label for="cfg-view-width">Chiều rộng (px)</label>
+                <input id="cfg-view-width" type="number" min="320" data-path="viewport.width" />
+                <span class="cfg-hint">Bề rộng sân đấu gốc. Đặt trùng tỉ lệ với OBS Browser Source để hiển thị vừa khít.</span>
+              </div>
+              <div class="cfg-field">
+                <label for="cfg-view-height">Chiều cao (px)</label>
+                <input id="cfg-view-height" type="number" min="240" data-path="viewport.height" />
+                <span class="cfg-hint">Bề cao sân đấu gốc. Mép ngoài màn hình chính là kết giới — người chơi không vượt ra ngoài.</span>
+              </div>
+              <div class="cfg-field cfg-field-check">
+                <label for="cfg-view-adaptive">
+                  <input id="cfg-view-adaptive" type="checkbox" data-path="viewport.adaptive" />
+                  Tự co giãn theo màn hình OBS
+                </label>
+                <span class="cfg-hint">Sân đấu tự đổi hình dáng khít theo khung Browser Source (không viền đen, không méo). Khi kéo khung trên OBS hãy <b>giữ phím Shift</b> để khoá tỉ lệ, hoặc gõ kích thước trong Properties.</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="cfg-group">
+            <h3><span class="saw-chip white"></span> Răng cưa trắng — tích tap tim</h3>
+            <div class="cfg-grid">
+              <div class="cfg-field">
+                <label for="cfg-white-taps">Số lần tap tim</label>
+                <input id="cfg-white-taps" type="number" min="1" data-path="sawWhite.requireTaps" />
+                <span class="cfg-hint">Tích đủ số lần tap tim này là có răng cưa trắng.</span>
+              </div>
+              <div class="cfg-field">
+                <label for="cfg-white-dur">Hiệu lực (giây)</label>
+                <input id="cfg-white-dur" type="number" min="0" data-path="sawWhite.durationSec" />
+              </div>
+              <div class="cfg-field">
+                <label for="cfg-white-dps">Sát thương/giây</label>
+                <input id="cfg-white-dps" type="number" min="0" data-path="sawWhite.dps" />
+                <span class="cfg-hint">Cưa được người không có răng cưa.</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="cfg-group">
+            <h3><span class="saw-chip green"></span> Răng cưa xanh lá — follow / share</h3>
+            <div class="cfg-grid">
+              <div class="cfg-field">
+                <label for="cfg-green-dur">Hiệu lực (giây)</label>
+                <input id="cfg-green-dur" type="number" min="0" data-path="sawGreen.durationSec" />
+              </div>
+              <div class="cfg-field">
+                <label for="cfg-green-dps">Sát thương/giây</label>
+                <input id="cfg-green-dps" type="number" min="0" data-path="sawGreen.dps" />
+                <span class="cfg-hint">Mạnh hơn răng cưa trắng một chút.</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="cfg-group">
+            <h3><span class="saw-chip yellow"></span> Răng cưa vàng — quà từ 1 kim cương</h3>
+            <div class="cfg-grid">
+              <div class="cfg-field">
+                <label for="cfg-yellow-min">Giá tối thiểu (kim cương)</label>
+                <input id="cfg-yellow-min" type="number" min="0" data-path="sawYellow.minDiamonds" />
+              </div>
+              <div class="cfg-field">
+                <label for="cfg-yellow-dur">Hiệu lực (giây)</label>
+                <input id="cfg-yellow-dur" type="number" min="0" data-path="sawYellow.durationSec" />
+              </div>
+              <div class="cfg-field">
+                <label for="cfg-yellow-dps">Sát thương/giây</label>
+                <input id="cfg-yellow-dps" type="number" min="0" data-path="sawYellow.dps" />
+              </div>
+            </div>
+          </div>
+
+          <div class="cfg-group">
+            <h3><span class="saw-chip red"></span> Răng cưa đỏ — quà từ 5 kim cương</h3>
+            <div class="cfg-grid">
+              <div class="cfg-field">
+                <label for="cfg-red-min">Giá tối thiểu (kim cương)</label>
+                <input id="cfg-red-min" type="number" min="0" data-path="sawRed.minDiamonds" />
+              </div>
+              <div class="cfg-field">
+                <label for="cfg-red-dur">Hiệu lực (giây)</label>
+                <input id="cfg-red-dur" type="number" min="0" data-path="sawRed.durationSec" />
+              </div>
+              <div class="cfg-field">
+                <label for="cfg-red-dps">Sát thương/giây</label>
+                <input id="cfg-red-dps" type="number" min="0" data-path="sawRed.dps" />
+              </div>
+            </div>
+          </div>
+
+          <div class="cfg-group">
+            <h3>🔫 Bắn đạn — quà 10 kim cương</h3>
+            <div class="cfg-grid">
+              <div class="cfg-field">
+                <label for="cfg-gun-min">Giá tối thiểu (kim cương)</label>
+                <input id="cfg-gun-min" type="number" min="0" data-path="gun.minDiamonds" />
+              </div>
+              <div class="cfg-field">
+                <label for="cfg-gun-dur">Hiệu lực (giây)</label>
+                <input id="cfg-gun-dur" type="number" min="0" data-path="gun.durationSec" />
+              </div>
+              <div class="cfg-field">
+                <label for="cfg-gun-dmg">Sát thương/phát</label>
+                <input id="cfg-gun-dmg" type="number" min="0" data-path="gun.damagePerShot" />
+              </div>
+              <div class="cfg-field">
+                <label for="cfg-gun-rate">Tốc độ bắn (ms)</label>
+                <input id="cfg-gun-rate" type="number" min="50" data-path="gun.fireRateMs" />
+              </div>
+              <div class="cfg-field">
+                <label for="cfg-gun-speed">Tốc độ đạn</label>
+                <input id="cfg-gun-speed" type="number" min="0" data-path="gun.bulletSpeed" />
+              </div>
+            </div>
+          </div>
+
+          <div class="cfg-group">
+            <h3>⚡ Sấm sét — quà 15 kim cương</h3>
+            <div class="cfg-grid">
+              <div class="cfg-field">
+                <label for="cfg-lt-min">Giá tối thiểu (kim cương)</label>
+                <input id="cfg-lt-min" type="number" min="0" data-path="lightning.minDiamonds" />
+              </div>
+              <div class="cfg-field">
+                <label for="cfg-lt-dur">Hiệu lực (giây)</label>
+                <input id="cfg-lt-dur" type="number" min="0" data-path="lightning.durationSec" />
+              </div>
+              <div class="cfg-field">
+                <label for="cfg-lt-dmg">Sát thương</label>
+                <input id="cfg-lt-dmg" type="number" min="0" data-path="lightning.damage" />
+              </div>
+              <div class="cfg-field">
+                <label for="cfg-lt-radius">Bán kính vùng</label>
+                <input id="cfg-lt-radius" type="number" min="0" data-path="lightning.radius" />
+              </div>
+              <div class="cfg-field">
+                <label for="cfg-lt-cd">Cooldown (ms)</label>
+                <input id="cfg-lt-cd" type="number" min="100" data-path="lightning.cooldownMs" />
+                <span class="cfg-hint">Trong thời gian hiệu lực, cứ mỗi cooldown lại đánh sấm sét quanh người chơi.</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="cfg-group">
+            <h3>🌪️ Bão đạn + hút máu — quà 20 kim cương</h3>
+            <div class="cfg-grid">
+              <div class="cfg-field">
+                <label for="cfg-storm-min">Giá tối thiểu (kim cương)</label>
+                <input id="cfg-storm-min" type="number" min="0" data-path="storm.minDiamonds" />
+              </div>
+              <div class="cfg-field">
+                <label for="cfg-storm-dur">Hiệu lực (giây)</label>
+                <input id="cfg-storm-dur" type="number" min="0" data-path="storm.durationSec" />
+              </div>
+              <div class="cfg-field">
+                <label for="cfg-storm-dmg">Sát thương/phát</label>
+                <input id="cfg-storm-dmg" type="number" min="0" data-path="storm.damagePerShot" />
+              </div>
+              <div class="cfg-field">
+                <label for="cfg-storm-rate">Tốc độ bắn (ms)</label>
+                <input id="cfg-storm-rate" type="number" min="50" data-path="storm.fireRateMs" />
+              </div>
+              <div class="cfg-field">
+                <label for="cfg-storm-life">% hút máu (bonus)</label>
+                <input id="cfg-storm-life" type="number" min="0" max="100" data-path="storm.lifestealPct" />
+                <span class="cfg-hint">Cộng thêm lên tỉ lệ cướp chung. Tổng bão = cướp chung + % này.</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="cfg-group">
+            <h3>Chung</h3>
+            <div class="cfg-grid">
+              <div class="cfg-field">
+                <label for="cfg-misc-tick">Tick sát thương (ms)</label>
+                <input id="cfg-misc-tick" type="number" min="50" data-path="misc.damageTickMs" />
+                <span class="cfg-hint">Tần suất server-phía-game tính sát thương va chạm răng cưa.</span>
+              </div>
+              <div class="cfg-field">
+                <label for="cfg-misc-pr">Bán kính người chơi</label>
+                <input id="cfg-misc-pr" type="number" min="5" data-path="misc.playerRadius" />
+              </div>
+              <div class="cfg-field">
+                <label for="cfg-misc-sr">Bán kính răng cưa</label>
+                <input id="cfg-misc-sr" type="number" min="10" data-path="misc.sawRadius" />
+              </div>
+              <div class="cfg-field">
+                <label for="cfg-misc-life">Cướp máu khi gây sát thương (%)</label>
+                <input id="cfg-misc-life" type="number" min="0" max="200" data-path="misc.stealPct" />
+                <span class="cfg-hint">% sát thương chuyển thành máu/điểm cho người gây (mặc định 100%). Mọi nguồn cưa, súng, sét, bão đều áp dụng.</span>
+              </div>
+              <div class="cfg-field">
+                <label for="cfg-misc-sls">Cướp máu khi cưa (bonus %)</label>
+                <input id="cfg-misc-sls" type="number" min="0" max="100" data-path="misc.sawLifestealPct" />
+                <span class="cfg-hint">Cộng thêm lên tỉ lệ cướp chung. Tổng cưa = cướp chung + % này.</span>
+              </div>
+              <div class="cfg-field">
+                <label for="cfg-misc-display">Hiển thị trên đầu</label>
+                <select id="cfg-misc-display" data-path="misc.displayMode">
+                  <option value="names">Tên + thanh máu + số máu</option>
+                  <option value="number">Chỉ số máu/điểm</option>
+                </select>
+              </div>
+              <div class="cfg-field">
+                <label for="cfg-misc-sizemin">Cỡ nhỏ nhất (px)</label>
+                <input id="cfg-misc-sizemin" type="number" min="5" data-path="misc.sizeMin" />
+                <span class="cfg-hint">Bán kính khi máu ≤ 400.</span>
+              </div>
+              <div class="cfg-field">
+                <label for="cfg-misc-sizemax">Cỡ to nhất (px)</label>
+                <input id="cfg-misc-sizemax" type="number" min="5" data-path="misc.sizeMax" />
+                <span class="cfg-hint">Bán kính tối đa khi máu đạt đủ sizeFullScore.</span>
+              </div>
+              <div class="cfg-field">
+                <label for="cfg-misc-sizefull">Máu để đạt cỡ to nhất</label>
+                <input id="cfg-misc-sizefull" type="number" min="1" data-path="misc.sizeFullScore" />
+                <span class="cfg-hint">Máu/điểm cần để người chơi to tối đa (mặc định 800).</span>
+              </div>
+              <div class="cfg-field">
+                <label for="cfg-misc-scent">Tầm "ngửi thấy" kẻ địch (px)</label>
+                <input id="cfg-misc-scent" type="number" min="0" data-path="misc.scentRange" />
+                <span class="cfg-hint">Khoảng cách để bot chuyển từ đi bừa sang rình/săn người chơi.</span>
+              </div>
+              <div class="cfg-field">
+                <label for="cfg-misc-overlap">Đè tối đa (%)</label>
+                <input id="cfg-misc-overlap" type="number" min="0" max="100" data-path="misc.overlapPct" />
+                <span class="cfg-hint">% bán kính tổng được phép chồng lên nhau trước khi bị đẩy ra.</span>
+              </div>
+              <div class="cfg-field">
+                <label for="cfg-misc-bounce">Độ nảy khi va chạm (%)</label>
+                <input id="cfg-misc-bounce" type="number" min="0" max="100" data-path="misc.bounce" />
+                <span class="cfg-hint">Độ nảy bật ngược khi 2 người chơi chạm nhau.</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <!-- Docs -->
       <section id="panel-docs" class="panel">
         <div class="panel-head"><h2>Hướng dẫn & API</h2></div>
@@ -173,7 +473,7 @@
             <li>Mở trang <code>/admin</code>, đăng nhập bằng <code>ADMIN_TOKEN</code> (trong <code>.env</code>; nếu để trống thì xem dòng <code>ADMIN_TOKEN:</code> ở log lúc khởi động server).</li>
             <li>Kiểm tra trạng thái trên thanh trên cùng: <b>Live/Demo</b>, <b>Đã kết nối TikTok</b> hay chưa, room id, người xem, thời gian chạy.</li>
             <li>Vào tab <b>Cấu hình</b>: đặt username TikTok đang live, đặt <code>WS_TOKEN</code> nếu muốn bảo vệ cổng WebSocket, bật <b>Chế độ demo</b> để test không cần TikTok. Nhấn <b>Lưu &amp; áp dụng</b>.</li>
-            <li>Tab <b>Feed</b> để theo dõi sự kiện realtime; <b>Thống kê</b> để xem tổng quan; <b>Client</b> để quản lý kết nối từ game.</li>
+            <li>Tab <b>Feed</b> để theo dõi sự kiện realtime; <b>Thống kê</b> để xem tổng quan; <b>Client</b> để quản lý kết nối từ game; <b>Game</b> để chỉnh tham số vận hành các game trong <code>/games</code>.</li>
             <li>Game của bạn kết nối vào WebSocket (phần dưới) để nhận data — <b>không cần đăng nhập admin</b>.</li>
           </ol>
         </div>
@@ -217,6 +517,15 @@ ws.onmessage = (e) => {
         </div>
 
         <div class="card docs-block">
+          <h3>Games (trong <code>/games</code>)</h3>
+          <p class="docs-note">Mỗi game là một trang tĩnh trong <code>public/games/</code>, tự kết nối WebSocket để nhận dữ liệu. Mở link game rồi dán vào <b>OBS → Browser Source</b> là hiện lên màn hình stream. Danh sách game: <code id="docs-games-url"></code>.</p>
+          <ul class="docs-list">
+            <li><b>Đấu trường lưỡi cưa</b> — <code>/games/saw-arena/</code> — chỉnh luật chơi ở tab <b>Game</b> của trang này (thay đổi áp dụng realtime).</li>
+            <li>Khi client gửi <code>{ "type": "getConfig", "game": "saw-arena" }</code>, server trả về <code>{ "type": "gameConfig", "game": "…", "payload": {…cấu hình} }</code>.</li>
+          </ul>
+        </div>
+
+        <div class="card docs-block">
           <h3>Cấu trúc payload</h3>
           <p class="docs-note">Mọi sự kiện gửi tới game đều có dạng <code>{ "type": "tiktok", "payload": { "type": "…", "data": {…} } }</code>.</p>
           <div class="table-wrap">
@@ -254,6 +563,9 @@ ws.onmessage = (e) => {
               <tr><td><span class="method">POST</span></td><td><code>/api/admin/clients/:id/kick</code></td><td><span class="badge badge-admin">Admin</span></td><td>Ngắt một client theo id.</td></tr>
               <tr><td><span class="method">GET</span></td><td><code>/api/admin/stats</code></td><td><span class="badge badge-admin">Admin</span></td><td>Snapshot thống kê phiên.</td></tr>
               <tr><td><span class="method">POST</span></td><td><code>/api/admin/stats/reset</code></td><td><span class="badge badge-admin">Admin</span></td><td>Reset thống kê.</td></tr>
+              <tr><td><span class="method">GET</span></td><td><code>/api/admin/games</code></td><td><span class="badge badge-admin">Admin</span></td><td>Danh sách game + cấu hình hiện tại.</td></tr>
+              <tr><td><span class="method">PUT</span></td><td><code>/api/admin/games/:id/config</code></td><td><span class="badge badge-admin">Admin</span></td><td>Lưu cấu hình game + broadcast realtime.</td></tr>
+              <tr><td><span class="method">POST</span></td><td><code>/api/admin/games/:id/reset</code></td><td><span class="badge badge-admin">Admin</span></td><td>Khôi phục cấu hình game về mặc định.</td></tr>
               <tr><td><span class="method">WS</span></td><td><code>/</code></td><td><span class="badge badge-public">Công khai</span></td><td>Game nhận event realtime (xem phần trên).</td></tr>
               <tr><td><span class="method">WS</span></td><td><code>/admin</code></td><td><span class="badge badge-admin">Admin</span></td><td>Nhận status/stats/feed cho trang quản trị (cookie).</td></tr>
             </tbody>
@@ -280,6 +592,6 @@ ws.onmessage = (e) => {
 
   <div id="toast" class="toast hidden"></div>
 
-  <script src="/admin.js?v=6"></script>
+  <script src="/admin.js?v=9"></script>
 </body>
 </html>

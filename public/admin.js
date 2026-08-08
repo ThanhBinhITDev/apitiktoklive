@@ -71,6 +71,7 @@ function showApp() {
   refreshClients();
   connectAdminWs();
   renderDocsUrls();
+  loadGameSettings();
 }
 
 // ---------- docs ----------
@@ -432,6 +433,78 @@ $("#cfg-reconnect").addEventListener("click", async () => {
   } catch (ex) {
     msg.className = "config-msg err";
     msg.textContent = ex.message;
+  }
+});
+
+// ---------- game settings ----------
+
+const GAME_ID = "saw-arena";
+
+function getPath(obj, path) {
+  return path.split(".").reduce((o, k) => (o == null ? o : o[k]), obj);
+}
+
+function setPath(obj, path, value) {
+  const keys = path.split(".");
+  let o = obj;
+  for (let i = 0; i < keys.length - 1; i++) {
+    o[keys[i]] = o[keys[i]] || {};
+    o = o[keys[i]];
+  }
+  o[keys[keys.length - 1]] = value;
+}
+
+function fillGameForm(config) {
+  document.querySelectorAll("#game-config [data-path]").forEach((el) => {
+    const val = getPath(config, el.dataset.path);
+    if (val === undefined) return;
+    if (el.type === "checkbox") el.checked = !!val;
+    else el.value = val;
+  });
+}
+
+function collectGameConfig() {
+  const config = {};
+  document.querySelectorAll("#game-config [data-path]").forEach((el) => {
+    let val = el.type === "checkbox" ? el.checked : el.value;
+    if (el.type === "number") val = val === "" ? 0 : Number(val);
+    setPath(config, el.dataset.path, val);
+  });
+  return config;
+}
+
+async function loadGameSettings() {
+  try {
+    const data = await api("/api/admin/games");
+    const game = data.games.find((g) => g.id === GAME_ID);
+    if (!game) return;
+    $("#game-url").textContent = `${location.origin}${game.url}`;
+    fillGameForm(game.config);
+  } catch {
+    /* ignore */
+  }
+}
+
+$("#game-save").addEventListener("click", async () => {
+  try {
+    await api(`/api/admin/games/${GAME_ID}/config`, {
+      method: "PUT",
+      body: JSON.stringify(collectGameConfig()),
+    });
+    toast("Đã lưu cài đặt game.");
+  } catch (ex) {
+    toast(ex.message);
+  }
+});
+
+$("#game-reset").addEventListener("click", async () => {
+  if (!confirm("Khôi phục toàn bộ cài đặt game về mặc định?")) return;
+  try {
+    const res = await api(`/api/admin/games/${GAME_ID}/reset`, { method: "POST" });
+    fillGameForm(res.config);
+    toast("Đã khôi phục mặc định.");
+  } catch (ex) {
+    toast(ex.message);
   }
 });
 

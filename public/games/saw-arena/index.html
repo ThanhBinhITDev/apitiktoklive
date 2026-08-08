@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Đấu trường lưỡi cưa</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <canvas id="game"></canvas>
+
+  <div id="pill" class="pill">
+    <span class="dot"></span>
+    <span id="pill-text">Đang kết nối…</span>
+  </div>
+
+  <div id="count" class="count">👥 0</div>
+
+  <div id="hint" class="hint hidden">
+    <div class="hint-title">💬 Comment để vào sân đấu!</div>
+    <div class="hint-sub">
+      Tap tim → răng cưa trắng · Follow/Share → răng cưa xanh<br />
+      Quà 1💎 → vàng · 5💎 → đỏ · 10💎 → súng · 15💎 → sấm sét · 20💎 → bão đạn + hút máu
+    </div>
+  </div>
+
+  <div id="round" class="round hidden"></div>
+  <div id="banner" class="banner hidden">
+    <div class="title"></div>
+    <div class="sub"></div>
+  </div>
+  <div id="feed" class="feed"></div>
+
+  <script src="../_shared/common.js?v=8"></script>
+  <script src="game.js?v=8"></script>
+</body>
+</html>
